@@ -1,0 +1,21 @@
+# Dependencies & build output
+node_modules/
+dist/
+
+# Local runtime data (never committed)
+poke-coletor-data/
+tokens/
+*.log
+
+# Local diagnostics
+ws-dump.jsonl
+server-shapes.json
+auth-debug-*.json
+
+# Secrets & local config
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+Thumbs.db

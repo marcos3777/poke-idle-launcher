@@ -1,0 +1,53 @@
+{
+  "name": "poke-idle-launcher",
+  "version": "1.1.0",
+  "description": "Navegador leve (Electron) da comunidade Poke Idle World: acompanha até 4 contas, coleta 100% pela rede (WebSocket), preview PokeAPI, alertas de shiny/raridade/bolas/potions, dashboard, prints e overlay flutuante.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --publish never",
+    "dist:linux": "electron-builder --linux AppImage --publish never",
+    "check": "node --check main.js && node --check store.js && node --check preload.js && node --check game-parse.js && node --check calc.js && node --check server-api.js && node --check token-vault.js"
+  },
+  "author": "Poke Idle Launcher contributors",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.pokeidle.launcher",
+    "productName": "Poke Idle Launcher",
+    "directories": { "output": "dist" },
+    "files": [
+      "main.js",
+      "store.js",
+      "preload.js",
+      "game-parse.js",
+      "calc.js",
+      "server-api.js",
+      "token-vault.js",
+      "app.html",
+      "overlay.html"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico",
+      "artifactName": "Poke-Idle-Launcher-Windows-${arch}.${ext}"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Utility",
+      "icon": "build/icon.png",
+      "artifactName": "Poke-Idle-Launcher-Linux-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Poke Idle Launcher"
+    }
+  }
+}

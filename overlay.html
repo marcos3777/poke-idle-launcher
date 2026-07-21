@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<title>Overlay</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font-family: "Segoe UI", system-ui, sans-serif; background: transparent; overflow: hidden; }
+  #w { -webkit-app-region: drag; height: 100%; background: rgba(11,14,20,.92); border: 1px solid #2b3346; border-radius: 12px;
+    color: #e6e8ee; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 8px 26px #000a; }
+  .top { display: flex; align-items: center; gap: 8px; }
+  .top .nm { font-weight: 700; font-size: 13px; }
+  .top img { width: 40px; height: 40px; image-rendering: pixelated; }
+  .hunt { color: #8a93a8; font-size: 11px; }
+  .row { display: flex; gap: 12px; font-size: 12px; }
+  .row b { color: #ffd25a; }
+  .last { font-size: 11px; color: #9fe6ff; min-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .last.shiny { color: #ffe08a; }
+</style>
+</head>
+<body>
+  <div id="w">
+    <div class="top"><img id="mon" style="display:none"><div><div class="nm" id="nm">Poke Idle Launcher</div><div class="hunt" id="hunt">aguardando…</div></div></div>
+    <div class="row"><span>cap <b id="cap">0</b></span><span>✨ <b id="shiny">0</b></span><span>líq/h <b id="net">—</b></span></div>
+    <div class="last" id="last"></div>
+  </div>
+<script>
+  const P = window.poke;
+  const spr = (d) => d ? `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${d}.png` : '';
+  const fmt = (n) => n==null?'—':Number(n).toLocaleString('pt-BR');
+  let primary = null;
+  function apply(cs) {
+    if (primary == null) primary = cs.slot;
+    if (cs.slot !== primary) return;
+    const L = cs.leader;
+    const mon = document.getElementById('mon');
+    if (L) { mon.src = spr(L.dex); mon.style.display=''; document.getElementById('nm').textContent = L.name + (L.shiny?' ✨':''); }
+    document.getElementById('hunt').textContent = cs.hunt ? ('caçando ' + cs.hunt.name) : (cs.loggedIn ? '' : 'não logado');
+    const k = cs.kpi || {};
+    document.getElementById('cap').textContent = fmt(k.captures || 0);
+    document.getElementById('shiny').textContent = fmt(k.shinyCaught || 0);
+    const net = document.getElementById('net');
+    net.textContent = (k.netPerHour == null) ? '—' : (k.netPerHour >= 0 ? '+' : '−') + fmt(Math.abs(k.netPerHour));
+    net.style.color = (k.netPerHour || 0) < 0 ? '#ff6f81' : '#3fca74';
+  }
+  if (P) {
+    P.onState(apply);
+    P.onEvent((ev) => {
+      const el = document.getElementById('last');
+      if (ev.type === 'shiny_global') { el.textContent = `✨ ${ev.player} pegou ${ev.name}!`; el.className='last shiny'; }
+      else if (ev.type === 'shiny_capture') { el.textContent = `✨ SHINY seu: ${ev.name}!`; el.className='last shiny'; }
+      else if (ev.type === 'rare_capture') { el.textContent = `${ev.name} ${ev.rarity||''} IV ${ev.iv}`; el.className='last'; }
+    });
+  }
+</script>
+</body>
+</html>

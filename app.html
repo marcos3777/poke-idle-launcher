@@ -1,0 +1,874 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<title>Poke Idle Launcher</title>
+<style>
+  :root{
+    --bg:#0a0d13; --panel:#111621; --panel2:#161c2a; --panel3:#0d121b; --hover:#1a2231;
+    --line:#1f2734; --line2:#2c3648;
+    --txt:#e7e9ef; --mut:#8791a4; --mut2:#5a6478;
+    --gold:#ffce56; --good:#3fca74; --warn:#ffb151; --crit:#ff6f81; --info:#5fc6ff;
+    --r-Fraca:#8791a4; --r-Comum:#5bcf6e; --r-Incomum:#54a9ff; --r-Rara:#b184ff;
+    --r-Épica:#ff9a4d; --r-Lendária:#ffce56; --r-Mythic:#ff5ea8; --r-Ancient:#ff8a3d; --r-Divine:#67f0ff;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; }
+  body{ background:var(--bg); color:var(--txt); font-family:"Segoe UI",system-ui,-apple-system,sans-serif;
+    font-size:13px; -webkit-font-smoothing:antialiased; color-scheme:dark; overflow:hidden; }
+  .app{ display:flex; flex-direction:column; height:100vh; }
+  button{ font-family:inherit; cursor:pointer; }
+  ::-webkit-scrollbar{ width:10px; height:10px; } ::-webkit-scrollbar-thumb{ background:#232c3d; border-radius:6px; border:2px solid var(--bg); }
+
+  /* barra (arrastável) */
+  .bar{ height:46px; flex:0 0 46px; display:flex; align-items:center; gap:10px; padding:0 8px 0 14px;
+    background:var(--panel); border-bottom:1px solid var(--line); -webkit-app-region:drag; z-index:20; }
+  .brand{ display:flex; align-items:center; gap:8px; font-weight:800; letter-spacing:.3px; font-size:13px; }
+  .brand .logo{ width:16px; height:16px; border-radius:50%;
+    background:radial-gradient(circle at 50% 33%, #fff 0 25%, #ee4b4b 26% 48%, #17171a 49% 55%, #dcdcdc 56%); box-shadow:0 0 0 1.5px #17171a inset; }
+  .brand b{ color:var(--gold); }
+  .bar .sp{ flex:1; }
+  .bar button{ -webkit-app-region:no-drag; }
+  .tbtn{ height:30px; padding:0 11px; display:flex; align-items:center; gap:6px; border-radius:8px;
+    border:1px solid var(--line2); background:var(--panel2); color:var(--txt); font-size:12px; }
+  .tbtn:hover{ background:var(--hover); } .tbtn.on{ border-color:var(--gold); color:var(--gold); }
+  .ico{ width:32px; height:30px; border:1px solid var(--line); background:transparent; color:var(--mut); border-radius:8px; font-size:14px; }
+  .ico:hover{ background:var(--hover); color:var(--txt); } .ico.cl:hover{ background:#7a2130; color:#fff; }
+
+  /* banner VPS 24/7 */
+  .promo{ -webkit-app-region:no-drag; position:relative; display:flex; align-items:center; gap:8px; height:32px; padding:0 14px; margin-left:6px;
+    border:1px solid #ff8a3d66; border-radius:8px; cursor:pointer; overflow:hidden; color:#fff; font-size:12px; font-weight:800; letter-spacing:.2px;
+    background:linear-gradient(180deg,#3a1a0b,#7a2c0e 60%,#3a1a0b); box-shadow:0 0 0 1px #0006 inset, 0 0 14px #ff6a1e33; text-shadow:0 1px 2px #000a; }
+  .promo::before{ content:""; position:absolute; inset:0; background:linear-gradient(0deg,#ffb43dcc,#ff5e1e66 45%,transparent 75%); mix-blend-mode:screen;
+    animation:flame 1.05s ease-in-out infinite alternate; pointer-events:none; }
+  @keyframes flame{ 0%{ opacity:.55; transform:translateY(2px) scaleY(.96); } 100%{ opacity:.95; transform:translateY(-1px) scaleY(1.06); } }
+  .promo:hover{ border-color:#ffb43d; box-shadow:0 0 0 1px #0006 inset, 0 0 20px #ff6a1e66; }
+  .promo .txt{ position:relative; z-index:1; } .promo .txt b{ color:#ffe08a; }
+  .promo .fr{ position:relative; z-index:1; font-size:14px; filter:drop-shadow(0 0 5px #ff7a2e); animation:flick .7s steps(2) infinite; }
+  @keyframes flick{ 50%{ transform:translateY(-1px) rotate(-4deg); } }
+  @media(max-width:1000px){ .promo .txt{ display:none; } }
+
+  .body{ display:flex; flex:1; min-height:0; }
+  .side{ flex:0 0 236px; border-right:1px solid var(--line); background:var(--panel3); padding:12px 10px; display:flex; flex-direction:column; gap:8px; overflow-y:auto; }
+  .side-h{ display:flex; align-items:baseline; justify-content:space-between; padding:2px 4px 6px; }
+  .side-h .t{ font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--mut); font-weight:700; }
+  .side-h .s{ font-size:10.5px; color:var(--mut2); font-variant-numeric:tabular-nums; }
+  .nav{ display:flex; align-items:center; gap:9px; padding:9px 11px; border-radius:9px; border:1px solid transparent; color:var(--txt); background:transparent; text-align:left; width:100%; font-size:12.5px; }
+  .nav:hover{ background:var(--hover); } .nav.on{ background:var(--panel2); border-color:var(--line2); }
+  .nav .gi{ font-size:14px; width:16px; text-align:center; }
+  .acc{ display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:10px; border:1px solid var(--line); background:var(--panel); width:100%; text-align:left; position:relative; }
+  .acc:hover{ background:var(--hover); } .acc.on{ border-color:var(--gold); box-shadow:0 0 0 1px var(--gold) inset; }
+  .acc img{ width:32px; height:32px; image-rendering:pixelated; }
+  .acc .an{ font-weight:700; font-size:12.5px; display:flex; align-items:center; gap:6px; color:var(--txt); }
+  .dot{ width:7px; height:7px; border-radius:50%; background:#3b4353; display:inline-block; } .dot.on{ background:var(--good); box-shadow:0 0 6px var(--good); }
+  .acc .au{ font-size:10.5px; color:var(--mut); margin-top:2px; }
+  .acc .ak{ margin-left:auto; text-align:right; }
+  .acc .ak .v{ font-weight:800; color:var(--good); font-size:12.5px; font-variant-numeric:tabular-nums; } .acc .ak .k{ font-size:9px; color:var(--mut2); }
+  .acc .xr{ position:absolute; top:3px; right:5px; font-size:10px; color:var(--mut2); opacity:0; }
+  .acc:hover .xr{ opacity:1; } .acc .xr:hover{ color:var(--crit); }
+  /* chat do jogo (movido pra cá) */
+  .chatbox{ margin-top:8px; border:1px solid var(--line); border-radius:10px; background:var(--panel3); overflow:hidden; display:flex; flex-direction:column; flex:0 0 auto; }
+  .chat-h{ display:flex; align-items:center; justify-content:space-between; padding:8px 10px; cursor:pointer; font-size:11px; font-weight:700; color:var(--mut); text-transform:uppercase; letter-spacing:.08em; }
+  .chat-h:hover{ color:var(--txt); } .chat-x{ color:var(--mut2); }
+  .chatbox.closed .chat-tabs, .chatbox.closed .chat-body{ display:none; }
+  .chat-tabs{ display:flex; gap:3px; padding:0 6px 6px; flex-wrap:wrap; }
+  .chat-tab{ font-size:10.5px; padding:3px 7px; border-radius:6px; border:1px solid var(--line2); background:var(--panel2); color:var(--mut); }
+  .chat-tab:hover{ color:var(--txt); } .chat-tab.on{ border-color:var(--info); color:var(--info); }
+  .chat-body{ max-height:190px; overflow-y:auto; padding:4px 9px 8px; display:flex; flex-direction:column; gap:3px; }
+  .cmsg{ font-size:11.5px; line-height:1.35; word-break:break-word; }
+  .cmsg .cch{ font-size:9.5px; font-weight:700; text-transform:uppercase; } .cmsg .cnm{ font-weight:700; color:var(--txt); } .cmsg .cnm.vip{ color:var(--gold); }
+  .cmsg .clv{ color:var(--mut2); font-size:10px; } .cmsg .cbd{ color:var(--mut); }
+  .acc-list{ display:flex; flex-direction:column; gap:8px; margin-top:4px; flex:1 1 auto; min-height:64px; overflow-y:auto; }
+  .addacc{ margin-top:6px; padding:9px; border-radius:9px; border:1px dashed var(--line2); background:transparent; color:var(--mut); font-size:12px; flex:0 0 auto; }
+  .addacc:hover{ color:var(--gold); border-color:var(--gold); }
+
+  .side.wide{ flex:0 0 312px; }
+  .acc-chips{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:2px; }
+  .acc-chip{ display:flex; align-items:center; gap:6px; padding:6px 9px; border-radius:8px; border:1px solid var(--line); background:var(--panel); font-size:12px; cursor:pointer; color:var(--txt); }
+  .acc-chip:hover{ background:var(--hover); } .acc-chip.on{ border-color:var(--gold); box-shadow:0 0 0 1px var(--gold) inset; }
+  .acc-chip img{ width:20px; height:20px; image-rendering:pixelated; }
+  .sinfo{ display:flex; flex-direction:column; gap:10px; }
+  .sinfo .sk{ display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+  .sinfo .sk .b{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:9px 11px; }
+  .sinfo .sk .b .v{ font-size:16px; font-weight:800; font-variant-numeric:tabular-nums; } .sinfo .sk .b .v.good{ color:var(--good); } .sinfo .sk .b .v.crit{ color:var(--crit); }
+  .sinfo .sk .b .k{ font-size:9.5px; color:var(--mut); margin-top:2px; }
+  .block{ background:var(--panel); border:1px solid var(--line); border-radius:11px; padding:11px 12px; }
+  .block .st{ font-size:9.5px; letter-spacing:.11em; text-transform:uppercase; color:var(--mut); font-weight:700; margin-bottom:9px; }
+
+  .main{ flex:1; min-width:0; overflow:auto; padding:16px; }
+  .mhead{ display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+  .mhead .lg{ width:40px; height:40px; image-rendering:pixelated; }
+  .mhead .ti{ font-size:17px; font-weight:800; letter-spacing:-.2px; color:var(--txt); }
+  .mhead .st{ font-size:12px; color:var(--mut); margin-top:1px; }
+  .mhead .sp{ flex:1; }
+
+  .scene{ position:relative; overflow:hidden; border-radius:11px; border:1px solid var(--line2); background:#0d1119; }
+  .scene.sm{ height:194px; } .scene.lg{ height:100%; min-height:280px; }
+  .scene .bg{ position:absolute; inset:0; }
+  .scene .ground{ position:absolute; left:0; right:0; bottom:0; }
+  .scene .hud{ position:absolute; top:10px; left:12px; z-index:6; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.75); }
+  .scene .hud .n{ font-weight:800; font-size:13px; } .scene .hud .h{ font-size:10.5px; opacity:.9; }
+  .scene .live{ position:absolute; top:10px; right:12px; z-index:6; font-size:10px; color:#fff; background:#c0392b; padding:3px 8px; border-radius:20px; display:flex; align-items:center; gap:5px; }
+  .scene .live::before{ content:""; width:6px; height:6px; border-radius:50%; background:#fff; animation:blink 1.4s infinite; }
+  @keyframes blink{ 50%{ opacity:.25; } }
+  .scene .empty{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--mut); font-size:12px; }
+  .actor{ position:absolute; bottom:15%; z-index:4; }
+  .actor img{ display:block; image-rendering:pixelated; filter:drop-shadow(0 5px 6px rgba(0,0,0,.5)); }
+  .actor .sh{ position:absolute; left:50%; bottom:-5px; width:72%; height:9px; transform:translateX(-50%); background:radial-gradient(closest-side, rgba(0,0,0,.55), transparent); z-index:-1; }
+
+  .sect{ font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--mut); font-weight:700; margin:0 0 9px; }
+  .panel{ background:var(--panel); border:1px solid var(--line); border-radius:13px; padding:14px; }
+  .dgrid{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:13px; margin-bottom:13px; }
+  .dgrid .span2{ grid-column:span 2; }
+  .leadline{ display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin-top:11px; font-size:12px; }
+  .leadline img{ width:26px; height:26px; image-rendering:pixelated; }
+
+  .kpis{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:14px; }
+  .kpi{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:11px 13px; }
+  .kpi .v{ font-size:21px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-.4px; line-height:1.1; }
+  .kpi .v.good{ color:var(--good); } .kpi .v.crit{ color:var(--crit); } .kpi .k{ font-size:10.5px; color:var(--mut); margin-top:3px; }
+
+  .rar{ display:inline-block; font-size:10px; font-weight:700; padding:1px 6px; border-radius:5px; }
+  .boosts{ display:flex; gap:6px; flex-wrap:wrap; margin-top:12px; }
+  .bch{ display:flex; align-items:center; gap:5px; font-size:11px; padding:4px 8px; border-radius:7px; background:var(--panel2); border:1px solid var(--line2); }
+  .bch .t{ color:var(--warn); font-weight:700; font-variant-numeric:tabular-nums; }
+
+  .goal{ margin-bottom:11px; } .goal:last-child{ margin:0; }
+  .goal .gl{ display:flex; font-size:12px; margin-bottom:5px; } .goal .gl .gv{ margin-left:auto; color:var(--mut); font-variant-numeric:tabular-nums; } .goal .gl .gv.ok{ color:var(--good); }
+  .trk{ height:7px; border-radius:5px; background:#0b0f17; border:1px solid var(--line); overflow:hidden; }
+  .trk i{ display:block; height:100%; background:var(--info); border-radius:5px; }
+  .trk i.gold{ background:var(--gold); } .trk i.card{ background:#b184ff; }
+
+  .mrow{ display:flex; justify-content:space-between; font-size:12px; padding:5px 0; border-bottom:1px solid var(--line); }
+  .mrow:last-child{ border:0; } .mrow .k{ color:var(--mut); } .mrow .v{ font-weight:700; font-variant-numeric:tabular-nums; }
+  .mrow .v.gold{ color:var(--gold); } .mrow .v.crit{ color:var(--crit); } .mrow .v.good{ color:var(--good); }
+
+  .prh{ display:flex; align-items:center; gap:11px; margin-bottom:11px; }
+  .prh .pic{ width:40px; height:40px; border-radius:10px; display:grid; place-items:center; font-size:20px; background:#221c0c; border:1px solid #4a3d14; }
+  .prh .pn{ font-weight:800; font-size:13.5px; } .prh .px{ font-size:11px; color:var(--mut); margin-top:1px; }
+  .prh .pb{ margin-left:auto; text-align:right; } .prh .pb .v{ font-size:19px; font-weight:800; color:var(--good); } .prh .pb .k{ font-size:9px; color:var(--mut); text-transform:uppercase; letter-spacing:.05em; }
+  .ranks{ display:flex; gap:5px; margin:0 0 10px; }
+  .rp{ flex:1; text-align:center; padding:6px 2px 5px; border-radius:8px; background:var(--panel2); border:1px solid var(--line); }
+  .rp .l{ font-weight:800; font-size:12.5px; } .rp .p{ font-size:9px; color:var(--mut); margin-top:1px; }
+  .rp.cur{ background:#241d0b; border-color:var(--gold); } .rp.cur .l{ color:var(--gold); } .rp.cur .p{ color:#e3c877; }
+  .prof-note{ font-size:11px; color:var(--warn); background:rgba(255,177,81,.07); border:1px dashed rgba(255,177,81,.32); border-radius:9px; padding:8px 11px; margin-top:2px; }
+
+  .capbar{ display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin-bottom:10px; }
+  .capbar select, .capbar label{ font-size:12px; }
+  .capbar select{ background:var(--panel2); color:var(--txt); border:1px solid var(--line2); border-radius:7px; padding:5px 8px; }
+  .capbar label{ display:flex; align-items:center; gap:5px; color:var(--mut); }
+  .capbar .cnt{ margin-left:auto; font-size:11.5px; color:var(--mut); font-variant-numeric:tabular-nums; }
+  .tblwrap{ overflow:auto; max-height:440px; border:1px solid var(--line); border-radius:11px; }
+  table.caps{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.caps th{ text-align:left; font-weight:600; color:var(--mut); padding:9px 12px; background:var(--panel3); border-bottom:1px solid var(--line); position:sticky; top:0; cursor:pointer; white-space:nowrap; }
+  table.caps th:hover{ color:var(--txt); }
+  table.caps td{ padding:8px 12px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  table.caps tr:last-child td{ border:0; }
+  table.caps tbody tr:hover{ background:var(--hover); }
+  table.caps tr.sh{ background:rgba(255,206,86,.05); }
+  table.caps img{ width:26px; height:26px; image-rendering:pixelated; vertical-align:middle; margin-right:7px; }
+  .num{ font-variant-numeric:tabular-nums; text-align:right; }
+
+  .ovgrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); gap:14px; }
+  .ovc{ background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:15px; cursor:pointer; }
+  .ovc:hover{ border-color:var(--line2); background:var(--panel2); }
+  .ovc .h{ display:flex; align-items:center; gap:11px; margin-bottom:12px; }
+  .ovc .h img{ width:46px; height:46px; image-rendering:pixelated; }
+  .ovc .h .n{ font-weight:800; font-size:14px; display:flex; align-items:center; gap:7px; color:var(--txt); } .ovc .h .u{ font-size:11px; color:var(--mut); margin-top:2px; }
+  .ovc .kp{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:9px; margin-bottom:11px; }
+  .ovc .kp .v{ font-size:16px; font-weight:800; font-variant-numeric:tabular-nums; } .ovc .kp .v.good{ color:var(--good); } .ovc .kp .v.crit{ color:var(--crit); } .ovc .kp .k{ font-size:9.5px; color:var(--mut); }
+  .ovc .open{ font-size:11px; color:var(--gold); }
+
+  .gamearea{ flex:1; min-width:0; padding:16px; display:flex; flex-direction:column; }
+  .empty-main{ color:var(--mut); font-size:13px; padding:30px; text-align:center; }
+
+  #toast{ position:fixed; top:54px; right:14px; display:flex; flex-direction:column; gap:8px; z-index:40; }
+  .t{ background:var(--panel2); border:1px solid var(--line2); border-left:4px solid var(--gold); padding:9px 13px; border-radius:9px; font-size:12.5px; box-shadow:0 8px 22px #000a; }
+  .t.rare{ border-left-color:#b184ff; } .t.global{ border-left-color:var(--info); }
+  .t.warn{ border-left-color:var(--warn); } .t.crit{ border-left-color:var(--crit); } .t.ok{ border-left-color:var(--good); }
+  #settings{ position:fixed; top:50px; right:8px; z-index:41; display:none; flex-direction:column; gap:10px; padding:13px 15px; background:var(--panel2); border:1px solid var(--line2); border-radius:11px; font-size:12px; box-shadow:0 12px 32px #000c; }
+  #settings.show{ display:flex; } #settings label{ color:var(--mut); display:flex; align-items:center; gap:7px; }
+  #settings select, #settings input[type=number]{ background:var(--panel); color:var(--txt); border:1px solid var(--line2); border-radius:6px; padding:4px 6px; }
+
+  /* dashboard agregado */
+  .kpis.k6{ grid-template-columns:repeat(6,1fr); }
+  table.caps tfoot td{ padding:10px 12px; border-top:2px solid var(--line2); background:var(--panel3); font-weight:800; font-variant-numeric:tabular-nums; position:sticky; bottom:0; }
+  table.caps tbody tr[data-slot]{ cursor:pointer; }
+  table.caps td .dot{ margin-right:7px; vertical-align:middle; }
+
+  /* feeds (capturas / shiny) */
+  .feed{ display:flex; flex-direction:column; max-height:328px; overflow:auto; margin:-2px -4px; }
+  .feed .fr{ display:flex; align-items:center; gap:10px; padding:7px 6px; border-bottom:1px solid var(--line); }
+  .feed .fr:last-child{ border:0; }
+  .feed .fr img{ width:28px; height:28px; image-rendering:pixelated; flex:0 0 28px; }
+  .feed .fr .ic{ width:28px; height:28px; display:grid; place-items:center; font-size:16px; flex:0 0 28px; }
+  .feed .fr .nm{ font-weight:700; font-size:12.5px; } .feed .fr .nm .rr{ font-weight:600; }
+  .feed .fr .mt{ font-size:10.5px; color:var(--mut); margin-top:1px; }
+  .feed .fr .rt{ margin-left:auto; text-align:right; color:var(--mut); font-size:10.5px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .feed .fr .rt .iv{ color:var(--txt); font-weight:700; font-size:12px; }
+  .feed .fr.sh{ background:rgba(255,206,86,.06); }
+  .feed-empty{ color:var(--mut); font-size:11.5px; padding:14px 6px; text-align:center; }
+  /* bag (grid de itens) */
+  .bag-sec{ margin-bottom:12px; } .bag-sec:last-child{ margin:0; }
+  .bag-sh{ display:flex; align-items:center; font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--mut); font-weight:700; margin-bottom:7px; }
+  .bag-sh .bag-tot{ margin-left:auto; color:var(--gold); font-variant-numeric:tabular-nums; }
+  .bag-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(64px,1fr)); gap:7px; }
+  .bag-item{ position:relative; background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:7px 4px 5px; text-align:center; overflow:hidden; }
+  .bag-item:hover{ border-color:var(--line2); background:var(--hover); }
+  .bag-item.prot{ border-color:#7a5cff66; background:#b184ff10; }
+  .bag-item img{ width:30px; height:30px; image-rendering:pixelated; } .bag-item .bag-ph{ display:inline-block; width:30px; height:30px; }
+  .bag-item .bag-q{ position:absolute; top:3px; right:4px; font-size:9.5px; font-weight:800; color:var(--txt); background:#0009; border-radius:5px; padding:0 3px; }
+  .bag-item .bag-lock{ position:absolute; top:3px; left:4px; font-size:10px; }
+  .bag-item .bag-nm{ display:block; font-size:9px; color:var(--mut); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  /* distribuição por raridade */
+  .rbar{ margin-bottom:9px; } .rbar:last-child{ margin:0; }
+  .rbar .rl{ display:flex; font-size:11.5px; margin-bottom:4px; } .rbar .rl .rc{ margin-left:auto; color:var(--mut); font-variant-numeric:tabular-nums; }
+  .rbar .rt{ height:8px; border-radius:5px; background:#0b0f17; border:1px solid var(--line); overflow:hidden; }
+  .rbar .rt i{ display:block; height:100%; border-radius:5px; }
+
+  @media(max-width:1080px){ .kpis{ grid-template-columns:repeat(3,1fr); } .kpis.k6{ grid-template-columns:repeat(3,1fr); } .dgrid{ grid-template-columns:1fr; } .dgrid .span2{ grid-column:auto; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="bar">
+    <span class="brand"><span class="logo"></span>POKE IDLE <b>LAUNCHER</b></span>
+    <button class="promo" id="promo-banner" title="Rode seu jogo 24/7 na VPS">
+      <span class="fr">🔥</span><span class="txt">Rode seu jogo <b>24/7 na VPS</b> · aprenda como</span><span class="fr">🔥</span>
+    </button>
+    <span class="sp"></span>
+    <span id="mode-toggle" style="display:none;gap:4px;align-items:center">
+      <button class="tbtn" id="btn-grid">▦ Grade</button>
+      <button class="tbtn" id="btn-focus">▢ Foco</button>
+    </span>
+    <button class="tbtn" id="btn-game">▦ Ver jogo</button>
+    <button class="ico" id="btn-overlay" title="Overlay flutuante">📌</button>
+    <button class="ico" id="btn-gear" title="Configurações">⚙</button>
+    <button class="ico" id="btn-min">—</button>
+    <button class="ico cl" id="btn-close">✕</button>
+  </div>
+  <div class="body">
+    <aside class="side" id="side"></aside>
+    <main class="main" id="main"></main>
+  </div>
+</div>
+<div id="settings">
+  <label>Alertar raridade ≥ <select id="setRarity"><option>Rara</option><option>Épica</option><option>Lendária</option><option>Mythic</option></select></label>
+  <label>ou IV ≥ <input id="setIv" type="number" min="0" max="100" step="5" style="width:56px"> %</label>
+  <label><input id="setShot" type="checkbox"> print no meu shiny</label>
+  <label><input id="setSound" type="checkbox"> som</label>
+  <label>🔴 alertar bolas ≤ <input id="setBalls" type="number" min="0" step="50" style="width:66px"></label>
+  <label>💊 alertar potions ≤ <input id="setPotions" type="number" min="0" step="10" style="width:66px"></label>
+  <label><input id="setSell" type="checkbox"> 🛑 bloquear venda de raro (shiny/lendário, pheromone, cards)</label>
+  <label><input id="setClean" type="checkbox"> 🧹 limpar a UI do jogo (esconde chat, apaga barras)</label>
+  <hr style="border:0;border-top:1px solid var(--line2);margin:2px 0;width:100%">
+  <label title="Grava os frames do WebSocket num arquivo pra realinhar o parser"><input id="setDiag" type="checkbox"> 🛠 modo diagnóstico (gravar dump)</label>
+  <button class="tbtn" id="btnDump" style="align-self:flex-start">📂 abrir pasta do dump</button>
+</div>
+<div id="toast"></div>
+<script>
+  const P = window.poke || null;
+  const spr  = (d)=> d ? `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${d}.png` : '';
+  const anim = (d)=> d ? `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/${d}.gif` : '';
+  const RARS=['Fraca','Comum','Incomum','Rara','Épica','Lendária','Mythic','Ancient','Divine'];
+  const rcol=(r)=>getComputedStyle(document.documentElement).getPropertyValue('--r-'+r).trim()||'#8791a4';
+  const fmt=(n)=> (n==null?'—':Number(n).toLocaleString('pt-BR'));
+  const fmtSigned=(n)=> n==null?'—':(n>=0?'+':'−')+fmt(Math.abs(n));
+  const timeStr=(ts)=>{ try{ return new Date(ts).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }catch{ return ''; } };
+  function since(ms){ if(!ms) return ''; const s=Math.floor(ms/1000), h=Math.floor(s/3600), m=Math.floor(s%3600/60); return h?`${h}h${String(m).padStart(2,'0')}`:`${m}min`; }
+  function untilStr(u){ if(!u) return ''; const ms=u-Date.now(); if(ms<=0) return 'expirou'; const m=Math.round(ms/60000); return m>=60?`${Math.floor(m/60)}h${String(m%60).padStart(2,'0')}`:`${m}min`; }
+  const onerr = `onerror="this.onerror=null;this.src='';this.style.visibility='hidden'"`;
+
+  // estado da UI
+  const states={};       // slot -> compactState (cru do main)
+  let accounts=[];        // [slot,...]
+  let view='dash', sel=null, gameMode='grid';
+  let capData=[];         // capturas do store (getEvents)
+  let feed=[];            // TODOS os eventos do store (pro feed de shiny do dashboard)
+  let feedLoaded=false;
+  let chatMsgs=[], chatOpen=true, chatChannel='all';   // chat do jogo (movido pra cá)
+  let dashSort={k:'net',dir:-1};   // ordenação da tabela do dashboard
+  let capPeriod=0;                 // filtro do feed de capturas: 0=sessão, senão ms (1h/15min)
+  let trend=[], lastSample=0;      // série temporal (amostra os totais ao vivo) pro mini-gráfico
+  let capF={acc:'', rar:'', shiny:false}, capSort={k:'ts', dir:-1};
+  const RANKS=[['E','+3%'],['D','+6%'],['C','+9%'],['B','+12%'],['A','+15%'],['S','+18%']];
+
+  const cs = (slot)=>states[slot]||{};
+  const boostShiny = (c)=>{ const b=(c.boosts||[]).find(x=>/shiny|lucky/i.test(x.name||'')); return b?(b.name+(b.pct?` +${b.pct}%`:'')):'—'; };
+
+  // ---------- anti-flicker: construir 1x, depois só PATCH ----------
+  let mounted=null, sceneKey=null, rafPending=false;
+  function setText(id,v){ const e=document.getElementById(id); if(e && e.textContent!==String(v)) e.textContent=v; }
+  function setHTML(id,h){ const e=document.getElementById(id); if(e && e.innerHTML!==h) e.innerHTML=h; }
+  function setSrc(id,s){ const e=document.getElementById(id); if(e && e.getAttribute('src')!==s) e.src=s; }
+  function subText(c){ const L=c.leader, t=c.trainer;
+    const acc=`${t&&t.level?`Treinador Nv.${fmt(t.level)}`:''}${c.accountGold!=null?` · 💰 ${fmt(c.accountGold)}`:''}${t&&t.rank?` · rank #${fmt(t.rank)}${t.totalPlayers?'/'+fmt(t.totalPlayers):''}`:''}`;
+    const hunt=`${L?`${L.name} Lv.${L.level}`:''}${c.hunt?` · caçando ${c.hunt.name}`:''}${c.live&&c.live.sinceMs?` · há ${since(c.live.sinceMs)}`:''}`;
+    return [acc,hunt].filter(Boolean).join('  ·  '); }
+  function goalsHTML(c){ return goalsOf(c).map(g=>bar(g[0],g[1],g[2],g[3])).join('')||'<div style="color:var(--mut);font-size:11px">—</div>'; }
+  function leadTextHTML(c){ const L=c.leader; if(!L) return '<span style="color:var(--mut)">sem líder</span>'; const rc=rcol(L.rarity);
+    return `<b>${L.name}</b> <span class="rar" style="color:${rc};background:${rc}22">${L.rarity||''}</span> <span style="color:var(--mut)">Power ${fmt(L.power)} · IV ${L.iv}/192</span>`; }
+  function boostsHTML(c){ return (c.boosts||[]).map(b=>`<span class="bch">${b.emoji||'⏱'} ${b.name} <span class="t">${untilStr(b.until)}</span></span>`).join(''); }
+  function shinyRowsHTML(c){ const sh=c.shiny||{};
+    return `<div class="mrow"><span class="k">Aparecem por hora</span><span class="v gold">${sh.foundPerHour!=null?String(sh.foundPerHour).replace('.',','):'0'}/h</span></div>
+      <div class="mrow"><span class="k">Apareceram · capturados</span><span class="v">${sh.found||0} · ${sh.caught||0}</span></div>
+      <div class="mrow"><span class="k">Perdidos</span><span class="v ${sh.lost?'crit':''}">${sh.lost||0}</span></div>
+      <div class="mrow"><span class="k">Balls gastas no shiny</span><span class="v">${sh.ballsOnShiny||0}</span></div>
+      <div class="mrow"><span class="k">Boost de shiny</span><span class="v ${boostShiny(c)!=='—'?'gold':''}">${boostShiny(c)}</span></div>`; }
+  const BAG_CATS=[['heal','💊 Potions'],['revive','✨ Revives'],['stone','🪨 Stones'],['card','🎴 Cards'],['tm','📀 TMs'],['loot','📦 Loot'],['clan','🏳️ Clã']];
+  function pokedexHTML(c){ const p=c.pokedex||{}, caught=p.caught||0, total=p.total||0, miss=p.missing, pct=total?Math.min(caught/total*100,100):0;
+    return `<div class="gl" style="display:flex;font-size:12px;margin-bottom:5px"><span>${fmt(caught)} / ${fmt(total)} espécies</span><span style="margin-left:auto;color:var(--gold)">${miss!=null?'faltam '+fmt(miss):''}</span></div>
+      <div class="trk"><i class="gold" style="width:${pct}%"></i></div>
+      <div class="mrow" style="margin-top:8px"><span class="k">🎁 Presentes no correio</span><span class="v ${(c.mail&&c.mail.gifts)?'good':''}">${(c.mail&&c.mail.gifts)||0}</span></div>`; }
+  function professionHTML(c){ const p=c.profession;
+    if(!p||!p.rankName) return `<div class="prh"><div class="pic">📸</div><div><div class="pn">${fmt(c.prof&&c.prof.photos)} fotos de shiny</div><div class="px">Rare Pokémon Picture</div></div></div><div class="prof-note">O rank e o progresso vêm do servidor assim que a conta loga.</div>`;
+    const ns=p.nextStep||{}, sp=ns.species||{}, pics=ns.pictures||{};
+    const typesOk=(ns.kills||[]).filter(k=>k.have>=k.need).length, typesTot=(ns.kills||[]).length;
+    const pbar=(lb,have,need)=>{ const pct=need?Math.min(have/need*100,100):100, ok=have>=need;
+      return `<div class="goal"><div class="gl"><span>${lb}</span><span class="gv ${ok?'ok':''}">${ok?'✓ ':''}${fmt(have)} / ${fmt(need)}</span></div><div class="trk"><i class="gold" style="width:${pct}%"></i></div></div>`; };
+    return `<div class="prh"><div class="pic">🏅</div>
+      <div><div class="pn">${p.rankName} <span style="color:var(--mut)">(${p.rankKey})</span></div><div class="px">+${p.catchBonusPct||0}% captura · ${fmt(p.pictures)} fotos · ${fmt(p.speciesCount)} espécies</div></div>
+      <div class="pb"><div class="v">${p.rank}/${p.maxRank}</div><div class="k">rank</div></div></div>
+      ${ns.toRankName?`<div class="px" style="margin:2px 0 10px;color:var(--mut)">Próximo rank: <b style="color:var(--txt)">${ns.toRankName}</b> (${ns.toRankKey})</div>
+        ${pbar('Espécies capturadas',sp.have||0,sp.need||0)}${pbar('Fotos de shiny',pics.have||0,pics.need||0)}${pbar('Tipos com kills no alvo',typesOk,typesTot)}`:'<div class="prof-note" style="margin-top:8px">Rank máximo atingido.</div>'}`; }
+  function goldBreakHTML(c){ const g=c.goldCalc||{};
+    return `<div class="mrow"><span class="k">Loot (venda)</span><span class="v good">+${fmt(g.lootGold)}</span></div>
+      <div class="mrow"><span class="k">Capturas (venda)</span><span class="v good">+${fmt(g.captureGold)}</span></div>
+      <div class="mrow"><span class="k">Bolas gastas</span><span class="v crit">−${fmt(g.ballCost)}</span></div>
+      <div class="mrow"><span class="k">Ouro/hora (estimado)</span><span class="v ${(g.perHour||0)<0?'crit':'gold'}">${fmtSigned(g.perHour)}</span></div>`; }
+  const fmtShort=(n)=>{ n=n||0; if(n>=1e6) return (n/1e6).toFixed(n>=1e7?0:1).replace('.',',')+'M'; if(n>=1e3) return (n/1e3).toFixed(n>=1e4?0:1).replace('.',',')+'k'; return String(n); };
+  const isProtItem=(i)=> (i.category==='card') || /pheromone|picture/i.test(i.name||'');   // bate com a proteção de venda
+  function bagSection(label,arr){ const tot=arr.reduce((s,i)=>s+(i.qty||0),0);
+    return `<div class="bag-sec"><div class="bag-sh">${label}<span class="bag-tot">${fmt(tot)}</span></div>
+      <div class="bag-grid">${arr.map(i=>{ const prot=isProtItem(i);
+        return `<div class="bag-item ${prot?'prot':''}" title="${esc(i.name)} · ${fmt(i.qty)}${prot?' — 🔒 protegido (não vende)':''}">
+          ${i.icon?`<img src="${i.icon}" ${onerr}>`:'<span class="bag-ph"></span>'}
+          <span class="bag-q">${fmtShort(i.qty)}</span>${prot?'<span class="bag-lock">🔒</span>':''}
+          <span class="bag-nm">${esc(i.name)}</span></div>`; }).join('')}</div></div>`; }
+  function bagHTML(c){ const items=(c.bag&&c.bag.items)||[], balls=c.ballList||[];
+    if(!items.length && !balls.length) return '<div class="feed-empty">Bag vazia — os itens aparecem quando a conta loga e sincroniza.</div>';
+    const byCat={}; for(const it of items) (byCat[it.category]=byCat[it.category]||[]).push(it);
+    let out='';
+    if(balls.length) out+=bagSection('🔴 Bolas', balls.map(b=>({name:b.name,qty:b.qty,icon:b.icon,category:'ball'})));
+    for(const [cat,label] of BAG_CATS){ const arr=byCat[cat]; if(arr&&arr.length) out+=bagSection(label, arr.slice().sort((a,b)=>b.qty-a.qty)); }
+    return out||'<div class="feed-empty">Bag vazia.</div>'; }
+  function dropsHTML(c){ const loot=(c.live&&c.live.loot)||{}, drops=Object.values(loot).sort((a,b)=>b.qty-a.qty).slice(0,6);
+    return drops.length?drops.map(d=>`<div class="mrow"><span class="k">${d.name}</span><span class="v">×${fmt(d.qty)}</span></div>`).join(''):'<div style="color:var(--mut);font-size:11px">— sem drops ainda</div>'; }
+  function scheduleRender(){ if(rafPending) return; rafPending=true; requestAnimationFrame(()=>{ rafPending=false; render(); }); }
+
+  // ---------- barras / helpers de render ----------
+  function bar(label,val,pct,cls){ const ok=/ok/.test(cls||'');
+    return `<div class="goal"><div class="gl"><span>${label}</span><span class="gv ${ok?'ok':''}">${ok?'✓ '+val:val}</span></div>
+      <div class="trk"><i class="${(cls||'').replace('ok','').trim()}" style="width:${Math.min(pct||0,100)}%"></i></div></div>`; }
+  function goalsOf(c){ const g=c.goals||{}, out=[];
+    if(g.shinyCard){ const s=g.shinyCard; out.push([`Shiny Card${s.species?' · '+s.species:''}`, `${fmt(s.kills)} / ${fmt(s.target)}`, s.pct, 'card']); }
+    if(g.pokedexBonus){ const p=g.pokedexBonus; out.push(['Bônus Pokédex (+25% XP)', p.done?'feito':`${fmt(p.kills)} / ${fmt(p.target)}`, p.pct, 'gold'+(p.done?' ok':'')]); }
+    if(g.streak){ const s=g.streak; out.push([`Próximo Streak Point${s.points?' ('+s.points+' feitos)':''}`, `${fmt(s.kills)} / ${fmt(s.target)}`, s.pct, 'gold']); }
+    return out; }
+
+  // ---------- chat do jogo (movido pra fora do jogo) ----------
+  const esc=(s)=>String(s==null?'':s).replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+  const CHAT_TABS=[['all','Todos'],['world','Mundo'],['comercio','Comércio'],['help','Ajuda']];
+  function chanKind(ch){ ch=(ch||'').toLowerCase(); if(/trade|comerc|market/.test(ch))return 'comercio'; if(/help|ajuda|duvid|newbie/.test(ch))return 'help'; return 'world'; }
+  const CHAN_META={world:['Mundo','var(--good)'],comercio:['Comércio','var(--gold)'],help:['Ajuda','var(--info)']};
+  function chatBlockHTML(){ return `<div class="chatbox ${chatOpen?'':'closed'}">
+    <div class="chat-h" id="chat-toggle"><span>💬 Chat do jogo</span><span class="chat-x">${chatOpen?'▾':'▸'}</span></div>
+    <div class="chat-tabs">${CHAT_TABS.map(t=>`<button class="chat-tab ${chatChannel===t[0]?'on':''}" data-ch="${t[0]}">${t[1]}</button>`).join('')}</div>
+    <div class="chat-body" id="chat-body"></div></div>`; }
+  function renderChat(){ const body=document.getElementById('chat-body'); if(!body) return;
+    const msgs=chatMsgs.filter(m=>chatChannel==='all'||chanKind(m.channel)===chatChannel).slice(-120);
+    body.innerHTML=msgs.map(m=>{ const k=chanKind(m.channel), meta=CHAN_META[k];
+      return `<div class="cmsg"><span class="cch" style="color:${meta[1]}">${meta[0]}</span> <span class="cnm ${m.vip?'vip':''}">${esc(m.from)}</span><span class="clv">${m.level?' ['+m.level+']':''}</span>: <span class="cbd">${esc(m.body)}</span></div>`;
+    }).join('')||'<div class="feed-empty">sem mensagens ainda</div>';
+    body.scrollTop=body.scrollHeight; }
+  function wireChat(){ const t=document.getElementById('chat-toggle'); if(t) t.onclick=()=>{ chatOpen=!chatOpen; renderSide(); };
+    document.querySelectorAll('.chat-tab').forEach(b=>b.onclick=()=>{ chatChannel=b.dataset.ch; renderSide(); }); renderChat(); }
+
+  // ---------- sidebar ----------
+  function accCard(slot){ const c=cs(slot); const L=c.leader; const net=c.kpi&&c.kpi.netPerHour;
+    return `<button class="acc ${view!=='all'&&sel===slot?'on':''}" data-slot="${slot}">
+      ${L?`<img src="${spr(L.dex)}" ${onerr}>`:'<div style="width:32px"></div>'}
+      <div><div class="an">${c.name||('Conta '+slot)}<span class="dot ${c.loggedIn?'on':''}"></span></div>
+        <div class="au">${c.hunt?('caçando '+c.hunt.name):(c.loggedIn?'sem hunt':'não logado')}</div></div>
+      <div class="ak"><div class="v ${net<0?'crit':''}">${fmtSigned(net)}</div><div class="k">gold/h líq</div></div>
+      <span class="xr" data-del="${slot}" title="fechar conta">✕</span></button>`; }
+
+  function sideInfo(slot){ const c=cs(slot); const k=c.kpi||{}, sh=c.shiny||{};
+    return `<div class="sinfo">
+      <div class="sk">
+        <div class="b"><div class="v ${(k.netPerHour||0)<0?'crit':'good'}">${fmtSigned(k.netPerHour)}</div><div class="k">gold/h líquido</div></div>
+        <div class="b"><div class="v">${fmt(k.xpPerHour)}</div><div class="k">XP/h</div></div>
+        <div class="b"><div class="v">${fmt(k.captures)}</div><div class="k">capturas</div></div>
+        <div class="b"><div class="v">${fmt(k.shinyCaught)}</div><div class="k">shiny</div></div>
+      </div>
+      <div class="block"><div class="st">Metas</div>${goalsOf(c).map(g=>bar(g[0],g[1],g[2],g[3])).join('')||'<div style="color:var(--mut);font-size:11px">—</div>'}</div>
+      <div class="block"><div class="st">Caça ao shiny</div>
+        <div class="mrow"><span class="k">Aparecem por hora</span><span class="v gold">${sh.foundPerHour!=null?String(sh.foundPerHour).replace('.',','):'0'}/h</span></div>
+        <div class="mrow"><span class="k">Apareceram · capturados</span><span class="v">${sh.found||0} · ${sh.caught||0}</span></div>
+        <div class="mrow"><span class="k">Balls no shiny</span><span class="v">${sh.ballsOnShiny||0}</span></div>
+      </div>
+      <div class="block"><div class="st">Pokédex</div>${pokedexHTML(c)}</div>
+      <div class="block"><div class="st">Ouro (estimado)</div>${goldBreakHTML(c)}</div>
+      <div class="block"><div class="st">Bag</div>${bagHTML(c)}</div>
+      <div class="block"><div class="st">Drops da hunt</div>${dropsHTML(c)}</div>
+      <div class="block"><div class="st">Treinador de Prestígio</div>${professionHTML(c)}</div>
+    </div>`; }
+
+  function renderSide(){
+    const side=document.getElementById('side'); side.classList.toggle('wide', view==='game');
+    if(view==='game' && sel!=null){
+      const c=cs(sel);
+      side.innerHTML=`<div class="side-h"><span class="t">${c.name||('Conta '+sel)}</span><span class="s">jogo em foco</span></div>
+        <div class="acc-chips">${accounts.map(s=>`<button class="acc-chip ${s===sel?'on':''}" data-slot="${s}">${cs(s).leader?`<img src="${spr(cs(s).leader.dex)}" ${onerr}>`:''}${cs(s).name||('Conta '+s)}</button>`).join('')}</div>
+        ${sideInfo(sel)}
+        ${chatBlockHTML()}`;
+      side.querySelectorAll('.acc-chip').forEach(b=>b.onclick=()=>{ gameMode='single'; selectAcc(+b.dataset.slot); });
+    } else {
+      side.innerHTML=`<button class="nav ${view==='dash'?'on':''}" id="nav-dash"><span class="gi">▦</span>Todas as contas<span class="s" style="margin-left:auto;font-size:10.5px;color:var(--mut2)">${accounts.length}/4</span></button>
+        <div class="acc-list">${accounts.map(accCard).join('')||'<div style="color:var(--mut);font-size:11.5px;padding:8px">Nenhuma conta. Clique em ＋ abaixo.</div>'}</div>
+        <button class="addacc" id="add-acc">＋ Adicionar conta</button>
+        ${chatBlockHTML()}`;
+      const nd=side.querySelector('#nav-dash'); if(nd) nd.onclick=()=>{ view='dash'; render(); };
+      const aa=side.querySelector('#add-acc'); if(aa) aa.onclick=()=>{ P&&P.addView(); };
+      side.querySelectorAll('.acc').forEach(b=>{ b.onclick=(e)=>{ if(e.target.dataset.del) return; selectAcc(+b.dataset.slot, true); };
+        const x=b.querySelector('.xr'); if(x) x.onclick=(e)=>{ e.stopPropagation(); if(confirm('Fechar essa conta? (o login fica salvo)')) P&&P.removeView(+x.dataset.del); }; });
+    }
+    wireChat();
+  }
+
+  // ---------- overview (todas) ----------
+  function renderAll(){
+    if(!accounts.length) return `<div class="empty-main">Nenhuma conta aberta.<br>Clique em <b>＋ Adicionar conta</b> na lateral.</div>`;
+    return `<div class="mhead"><div><div class="ti">Todas as contas</div><div class="st">${accounts.length} ${accounts.length===1?'conta':'contas'} · clique numa pra ver o detalhe</div></div></div>
+      <div class="ovgrid">${accounts.map(slot=>{ const c=cs(slot), L=c.leader, k=c.kpi||{};
+        return `<div class="ovc" data-slot="${slot}">
+          <div class="h">${L?`<img src="${spr(L.dex)}" ${onerr}>`:''}<div><div class="n">${c.name||('Conta '+slot)}<span class="dot ${c.loggedIn?'on':''}"></span></div>
+            <div class="u">${L?`${L.name} Lv.${L.level}`:'—'}${c.hunt?' · caçando '+c.hunt.name:''}</div></div></div>
+          <div class="kp">
+            <div><div class="v ${(k.netPerHour||0)<0?'crit':'good'}">${fmtSigned(k.netPerHour)}</div><div class="k">gold/h líq</div></div>
+            <div><div class="v">${fmt(k.xpPerHour)}</div><div class="k">XP/h</div></div>
+            <div><div class="v">${fmt(k.captures)}<span style="font-size:11px;color:var(--mut)"> · ✨${fmt(k.shinyCaught)}</span></div><div class="k">capturas</div></div>
+          </div><div class="open">${c.loggedIn?'ver detalhe →':'clique na tela do jogo pra logar →'}</div></div>`; }).join('')}</div>`;
+  }
+
+  // ---------- dashboard agregado (todas as contas de relance) ----------
+  function dashRow(slot){ const c=cs(slot), L=c.leader, k=c.kpi||{}, live=c.live||{}, t=c.trainer;
+    const bc=c.bestCatch, bcCol=bc?(bc.shiny?'var(--gold)':rcol(bc.rarity)):'';
+    const last=(c.recent&&c.recent[0])||null, lastCol=last?(last.shiny?'var(--gold)':rcol(last.rarity)):'';
+    const stTxt=!c.loggedIn?'não logado':(c.hunt?('caçando '+c.hunt.name):'sem hunt · parado');
+    const stCol=!c.loggedIn?'var(--mut2)':(c.hunt?'var(--good)':'var(--warn)');
+    return `<tr data-slot="${slot}">
+      <td><span class="dot ${c.loggedIn?'on':''}"></span>${L?`<img src="${spr(L.dex)}" ${onerr}>`:''}${c.name||('Conta '+slot)}${t&&t.level?` <span style="color:var(--mut2);font-size:10.5px">Nv.${fmt(t.level)}</span>`:''}</td>
+      <td>${c.hunt?c.hunt.name:'<span style="color:var(--mut2)">—</span>'}</td>
+      <td class="num ${(k.netPerHour||0)<0?'crit':'good'}" style="font-weight:700">${fmtSigned(k.netPerHour)}</td>
+      <td class="num">${fmt(k.xpPerHour)}</td>
+      <td class="num">${fmt(live.killsPerHour)}</td>
+      <td class="num">${fmt(k.captures)}</td>
+      <td class="num" style="color:${(k.shinyCaught||0)?'var(--gold)':'inherit'}">${fmt(k.shinyCaught)}</td>
+      <td>${bc?`<span style="color:${bcCol};font-weight:600">${bc.name}${bc.shiny?' ✨':''}</span> <span style="color:var(--mut)">${bc.iv!=null?bc.iv+'/192':''}</span>`:'<span style="color:var(--mut2)">—</span>'}</td>
+      <td>${last?`<span style="color:${lastCol}">${last.name}${last.shiny?' ✨':''}</span> <span style="color:var(--mut)">${timeStr(last.ts)}</span>`:'<span style="color:var(--mut2)">—</span>'}</td>
+      <td><span style="color:${stCol}">${stTxt}</span></td>
+    </tr>`; }
+  function renderDash(){
+    if(!accounts.length) return `<div class="empty-main">Nenhuma conta aberta.<br>Clique em <b>＋ Adicionar conta</b> na lateral.</div>`;
+    const T={net:0,xp:0,kills:0,cap:0,shiny:0,on:0,gold:0};
+    for(const s of accounts){ const c=cs(s), k=c.kpi||{}, live=c.live||{};
+      T.net+=(k.netPerHour||0); T.xp+=(k.xpPerHour||0); T.kills+=(live.killsPerHour||0); T.cap+=(k.captures||0); T.shiny+=(k.shinyCaught||0); T.gold+=(c.accountGold||0); if(c.loggedIn) T.on++; }
+    return `<div class="mhead"><div><div class="ti">Todas as contas</div><div class="st">${T.on}/${accounts.length} ${accounts.length===1?'conta ativa':'contas ativas'} · atualiza sozinho${T.gold?` · 💰 ${fmt(T.gold)} nas contas`:''}</div></div><div class="sp"></div></div>
+      <div class="kpis k6">
+        <div class="kpi"><div class="v ${T.net<0?'crit':'good'}">${fmtSigned(T.net)}</div><div class="k">gold/h líquido (total)</div></div>
+        <div class="kpi"><div class="v">${fmt(T.xp)}</div><div class="k">XP/h (total)</div></div>
+        <div class="kpi"><div class="v">${fmt(T.kills)}</div><div class="k">kills/h (total)</div></div>
+        <div class="kpi"><div class="v">${fmt(T.cap)}</div><div class="k">capturas (sessão)</div></div>
+        <div class="kpi"><div class="v ${T.shiny?'good':''}">${fmt(T.shiny)}</div><div class="k">✨ shiny (sessão)</div></div>
+        <div class="kpi"><div class="v">${T.on}<span style="font-size:13px;color:var(--mut)"> / ${accounts.length}</span></div><div class="k">contas ativas</div></div>
+      </div>
+      <div class="panel"><div class="sect" style="margin-bottom:11px">Por conta · clique no cabeçalho pra ordenar, na linha pra abrir o detalhe</div>
+        <div class="tblwrap" style="max-height:none"><table class="caps" id="dash-table">
+          <thead><tr>
+            <th data-sk="name">Conta${sortArrow('name')}</th><th data-sk="hunt">Hunt${sortArrow('hunt')}</th>
+            <th data-sk="net" class="num">Gold/h líq${sortArrow('net')}</th><th data-sk="xp" class="num">XP/h${sortArrow('xp')}</th><th data-sk="kills" class="num">Kills/h${sortArrow('kills')}</th>
+            <th data-sk="cap" class="num">Capturas${sortArrow('cap')}</th><th data-sk="shiny" class="num">✨${sortArrow('shiny')}</th><th>Melhor catch</th><th>Último catch</th><th>Status</th>
+          </tr></thead>
+          <tbody id="dash-body">${sortedAccounts().map(dashRow).join('')}</tbody>
+          <tfoot><tr>
+            <td>Total (${T.on} ativas)</td><td></td>
+            <td class="num ${T.net<0?'crit':'good'}">${fmtSigned(T.net)}</td>
+            <td class="num">${fmt(T.xp)}</td><td class="num">${fmt(T.kills)}</td>
+            <td class="num">${fmt(T.cap)}</td><td class="num" style="color:${T.shiny?'var(--gold)':'inherit'}">${fmt(T.shiny)}</td>
+            <td></td><td></td><td></td>
+          </tr></tfoot>
+        </table></div>
+      </div>
+      <div class="panel" style="margin-top:13px"><div class="sect">Tendência · última hora</div>${dashTrend()}</div>
+      <div class="dgrid" style="margin-top:13px">
+        <div class="panel span2"><div class="sect" style="display:flex;align-items:center;gap:10px">Últimas capturas · todas as contas ${periodChips()}</div>${dashCaptures()}</div>
+        <div class="panel"><div class="sect">Aparições de shiny ✨</div>${dashShiny()}</div>
+        <div class="panel span2"><div class="sect">Loot da sessão · todas as contas</div>${dashLoot()}</div>
+        <div class="panel"><div class="sect">Capturas por raridade</div>${dashRarity()}</div>
+      </div>`; }
+
+  // ----- ordenação da tabela -----
+  const sortArrow=(k)=> dashSort.k===k ? `<span style="color:var(--gold)"> ${dashSort.dir<0?'▾':'▴'}</span>` : '';
+  function sortedAccounts(){ const {k,dir}=dashSort;
+    const val=(s)=>{ const c=cs(s),kp=c.kpi||{},lv=c.live||{};
+      switch(k){ case 'name': return (c.name||('Conta '+s)).toLowerCase(); case 'hunt': return ((c.hunt&&c.hunt.name)||'').toLowerCase();
+        case 'net': return kp.netPerHour||0; case 'xp': return kp.xpPerHour||0; case 'kills': return lv.killsPerHour||0;
+        case 'cap': return kp.captures||0; case 'shiny': return kp.shinyCaught||0; default: return 0; } };
+    return accounts.slice().sort((a,b)=>{ const x=val(a),y=val(b);
+      if(typeof x==='string'&&typeof y==='string') return x.localeCompare(y)*dir; return (x>y?1:x<y?-1:0)*dir; }); }
+
+  // ----- mini-gráfico (sparkline) a partir da série amostrada ao vivo -----
+  function sampleTrend(){ const now=Date.now(); if(now-lastSample<15000) return; lastSample=now;
+    let net=0,xp=0,cap=0; for(const s of accounts){ const k=cs(s).kpi||{}; net+=k.netPerHour||0; xp+=k.xpPerHour||0; cap+=k.captures||0; }
+    trend.push({ts:now,net,xp,cap}); if(trend.length>240) trend.shift(); }   // 240×15s = 1h
+  function spark(vals,color){ if(!vals||vals.length<2) return `<svg width="100%" height="36"></svg>`;
+    const w=100,h=36,min=Math.min(...vals),max=Math.max(...vals),rng=(max-min)||1;
+    const xy=vals.map((v,i)=>`${(i/(vals.length-1)*w).toFixed(2)},${(h-3-((v-min)/rng)*(h-6)).toFixed(2)}`);
+    const area=`0,${h} ${xy.join(' ')} ${w},${h}`;
+    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" width="100%" height="36" style="display:block">
+      <polygon points="${area}" fill="${color}" opacity="0.10"/>
+      <polyline points="${xy.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`; }
+  function dashTrend(){ if(trend.length<2) return `<div class="feed-empty">Coletando dados… o gráfico aparece depois de alguns minutos de coleta.</div>`;
+    const nets=trend.map(t=>t.net), xps=trend.map(t=>t.xp), curNet=nets[nets.length-1], curXp=xps[xps.length-1];
+    return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+      <div><div class="mrow" style="border:0;padding:0 0 5px"><span class="k">Gold/h líquido (total)</span><span class="v ${curNet<0?'crit':'good'}">${fmtSigned(curNet)}</span></div>${spark(nets,curNet<0?'var(--crit)':'var(--good)')}</div>
+      <div><div class="mrow" style="border:0;padding:0 0 5px"><span class="k">XP/h (total)</span><span class="v" style="color:var(--info)">${fmt(curXp)}</span></div>${spark(xps,'var(--info)')}</div>
+    </div>`; }
+  function periodChips(){ const opts=[[0,'Sessão'],[3600000,'1h'],[900000,'15min']]; return `<span style="display:flex;gap:5px;margin-left:auto">`+
+    opts.map(([ms,lb])=>`<button class="acc-chip ${capPeriod===ms?'on':''}" data-period="${ms}" style="padding:3px 8px;font-size:10.5px">${lb}</button>`).join('')+`</span>`; }
+
+  // ----- agregadores do dashboard (dados AO VIVO do states + feed do store) -----
+  function allRecent(){ const out=[]; for(const s of accounts){ for(const x of (cs(s).recent||[])) out.push(Object.assign({slot:s, accountName:cs(s).name||('Conta '+s)}, x)); }
+    return out.sort((a,b)=>(b.ts||0)-(a.ts||0)); }
+  function allLoot(){ const m={}; for(const s of accounts){ for(const e of Object.values((cs(s).live&&cs(s).live.loot)||{})){ const k=e.itemId;
+    if(!m[k]) m[k]={itemId:e.itemId,name:e.name,icon:e.icon||null,qty:0,gold:0}; m[k].qty+=e.qty||0; m[k].gold+=(e.gold||0); } } return Object.values(m); }
+  const itemImg=(icon)=> icon?`<img src="${icon}" ${onerr} style="width:22px;height:22px;image-rendering:pixelated;vertical-align:middle;margin-right:8px">`:'<span style="display:inline-block;width:22px;margin-right:8px"></span>';
+  function allRarity(){ const m={}; for(const s of accounts){ for(const [r,n] of Object.entries((cs(s).live&&cs(s).live.byRarity)||{})) m[r]=(m[r]||0)+(n||0); } return m; }
+  function shinyTotals(){ const t={found:0,caught:0,lost:0,fph:0}; for(const s of accounts){ const sh=cs(s).shiny||{}; t.found+=sh.found||0; t.caught+=sh.caught||0; t.lost+=sh.lost||0; t.fph+=sh.foundPerHour||0; } return t; }
+  const SHINY_TYPES=['shiny_capture','shiny_wild','shiny_global'];
+  function shinyEvents(){ return (feed||[]).filter(e=>SHINY_TYPES.includes(e.type)).slice(0,14); }
+
+  function dashCaptures(){ let rows=allRecent(); if(capPeriod){ const cut=Date.now()-capPeriod; rows=rows.filter(e=>(e.ts||0)>=cut); } rows=rows.slice(0,14);
+    if(!rows.length) return `<div class="feed-empty">${capPeriod?'Nenhuma captura nesse período.':'Nenhuma captura ainda — o feed enche conforme as contas caçam.'}</div>`;
+    return `<div class="feed">`+rows.map(e=>{ const rc=e.shiny?'var(--gold)':rcol(e.rarity);
+      return `<div class="fr ${e.shiny?'sh':''}">${e.dex?`<img src="${spr(e.dex)}" ${onerr}>`:'<span class="ic">•</span>'}
+        <div><div class="nm">${e.name||''}${e.shiny?' ✨':''} <span class="rr" style="color:${rc}">${e.shiny?'Shiny':(e.rarity||'')}</span></div>
+          <div class="mt">${e.accountName||''}</div></div>
+        <div class="rt"><span class="iv">${e.iv!=null?e.iv+'/192':'—'}</span><br>${timeStr(e.ts)}</div></div>`; }).join('')+`</div>`; }
+
+  function dashLoot(){ const items=allLoot().sort((a,b)=>b.gold-a.gold), top=items.slice(0,10);
+    const totGold=items.reduce((s,i)=>s+i.gold,0), totQty=items.reduce((s,i)=>s+i.qty,0);
+    if(!items.length) return `<div class="feed-empty">Sem loot ainda nesta sessão.</div>`;
+    return `<div class="tblwrap" style="max-height:300px"><table class="caps">
+      <thead><tr><th>Item</th><th class="num">Quantidade</th><th class="num">Ouro (venda)</th></tr></thead>
+      <tbody>${top.map(i=>`<tr><td>${itemImg(i.icon)}${i.name||('item '+i.itemId)}</td><td class="num">${fmt(i.qty)}</td><td class="num good">+${fmt(i.gold)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td>Total${items.length>10?` (top 10 de ${items.length})`:''}</td><td class="num">${fmt(totQty)}</td><td class="num good">+${fmt(totGold)}</td></tr></tfoot>
+    </table></div>`; }
+
+  function dashShiny(){ const t=shinyTotals(), evs=shinyEvents();
+    const LB={shiny_capture:['✨','pegou shiny','var(--gold)'],shiny_wild:['👀','shiny selvagem','var(--info)'],shiny_global:['🌐','shiny global','var(--info)']};
+    const head=`<div class="sk" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:11px">
+      <div class="b" style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px"><div style="font-size:16px;font-weight:800;color:var(--gold)">${fmt(t.caught)}</div><div style="font-size:9.5px;color:var(--mut)">capturados</div></div>
+      <div class="b" style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px"><div style="font-size:16px;font-weight:800">${fmt(t.found)}</div><div style="font-size:9.5px;color:var(--mut)">apareceram</div></div>
+      <div class="b" style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px"><div style="font-size:16px;font-weight:800;color:${t.lost?'var(--crit)':'inherit'}">${fmt(t.lost)}</div><div style="font-size:9.5px;color:var(--mut)">perdidos</div></div></div>`;
+    const list=evs.length?`<div class="feed">`+evs.map(e=>{ const L=LB[e.type]||LB.shiny_capture;
+      return `<div class="fr">${e.dex?`<img src="${spr(e.dex)}" ${onerr}>`:`<span class="ic">${L[0]}</span>`}
+        <div><div class="nm" style="color:${L[2]}">${e.name||e.pokemonName||'?'}</div>
+          <div class="mt">${e.type==='shiny_global'?('🌐 '+(e.player||'alguém')):(L[1]+' · '+(e.accountName||''))}</div></div>
+        <div class="rt">${timeStr(e.ts)}</div></div>`; }).join('')+`</div>`
+      : `<div class="feed-empty">Nenhum shiny ainda. Quando aparecer (seu, selvagem ou de outro player) cai aqui.</div>`;
+    return head+list; }
+
+  function dashRarity(){ const m=allRarity(), tot=Object.values(m).reduce((a,b)=>a+b,0);
+    if(!tot) return `<div class="feed-empty">Sem capturas nesta sessão.</div>`;
+    return RARS.filter(r=>m[r]).map(r=>{ const n=m[r], pct=n/tot*100, c=rcol(r);
+      return `<div class="rbar"><div class="rl"><span style="color:${c}">${r}</span><span class="rc">${fmt(n)} · ${pct.toFixed(0)}%</span></div>
+        <div class="rt"><i style="width:${pct}%;background:${c}"></i></div></div>`; }).join(''); }
+
+  // ---------- detalhe ----------
+  function renderDetail(){
+    const c=cs(sel); if(!c.slot && !accounts.includes(sel)) return `<div class="empty-main">Selecione uma conta.</div>`;
+    const L=c.leader;
+    if(!c.loggedIn){ return `<div class="mhead"><img class="lg" src="" ${onerr}><div><div class="ti">${c.name||('Conta '+sel)}</div><div class="st">não logado</div></div><div class="sp"></div>
+      <button class="tbtn" id="det-game">▦ Ver o jogo</button></div>
+      <div class="empty-main">Essa conta ainda não está logada.<br>Clique em <b>Ver o jogo</b> e faça login com a sua mão.</div>`; }
+    return `
+    <div class="mhead"><img class="lg" id="d-lead-img" src="${L?spr(L.dex):''}" ${onerr}>
+      <div><div class="ti">${c.name||('Conta '+sel)}</div><div class="st" id="d-sub">${subText(c)}</div></div>
+      <div class="sp"></div><button class="tbtn" id="det-game">▦ Ver o jogo</button></div>
+
+    <div class="kpis">
+      <div class="kpi"><div class="v" id="d-net">—</div><div class="k">gold/h líquido</div></div>
+      <div class="kpi"><div class="v" id="d-xp">—</div><div class="k">XP/h</div></div>
+      <div class="kpi"><div class="v" id="d-cap">—</div><div class="k">capturas</div></div>
+      <div class="kpi"><div class="v" id="d-shiny">—</div><div class="k">shiny</div></div>
+      <div class="kpi"><div class="v" id="d-balls">—</div><div class="k">balls / captura</div></div>
+    </div>
+
+    <div class="dgrid">
+      <div class="panel span2"><div class="sect">Agora</div>
+        <div class="scene sm" id="scene-now"></div>
+        <div class="leadline"><img id="d-lead2" src="${L?spr(L.dex):''}" ${onerr}><span id="d-leadtext">${leadTextHTML(c)}</span><span style="flex:1"></span><span id="d-boosts">${boostsHTML(c)}</span></div>
+      </div>
+      <div class="panel"><div class="sect">Metas</div><div id="d-goals">${goalsHTML(c)}</div></div>
+      <div class="panel"><div class="sect">Caça ao shiny</div><div id="d-shiny-rows">${shinyRowsHTML(c)}</div></div>
+      <div class="panel"><div class="sect">Pokédex</div><div id="d-pokedex">${pokedexHTML(c)}</div></div>
+      <div class="panel"><div class="sect">Ouro (estimado, sem abrir o analyzer)</div><div id="d-gold">${goldBreakHTML(c)}</div></div>
+      <div class="panel"><div class="sect">Drops da hunt</div><div id="d-drops">${dropsHTML(c)}</div></div>
+      <div class="panel span2"><div class="sect">Bag — mochila por categoria</div><div id="d-bag">${bagHTML(c)}</div></div>
+      <div class="panel span2"><div class="sect">Profissão — Treinador de Prestígio</div><div id="d-prof">${professionHTML(c)}</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="sect" style="margin-bottom:11px">Capturas</div>
+      <div class="capbar">
+        <select id="f-acc"><option value="">Esta conta (${c.name||('Conta '+sel)})</option><option value="__all">Todas as contas</option></select>
+        <select id="f-rar"><option value="">Todas as raridades</option>${RARS.map(r=>`<option>${r}</option>`).join('')}</select>
+        <label><input type="checkbox" id="f-shiny"> só shiny ✨</label>
+        <span class="cnt" id="cap-cnt"></span>
+      </div>
+      <div class="tblwrap"><table class="caps"><thead><tr>
+        <th data-k="name">Pokémon</th><th data-k="account">Conta</th><th data-k="rarity">Raridade</th>
+        <th data-k="iv" class="num">IV</th><th data-k="quality" class="num">Quality</th><th data-k="ball">Bola</th><th data-k="ts">Hora</th>
+      </tr></thead><tbody id="cap-body"></tbody></table></div>
+    </div>`;
+  }
+
+  // PATCH do detalhe: só atualiza valores/texto — NÃO recria imagens nem a tabela (mata o flicker)
+  function tickDetail(c){ const k=c.kpi||{}, L=c.leader;
+    setSrc('d-lead-img', L?spr(L.dex):''); setSrc('d-lead2', L?spr(L.dex):'');
+    setText('d-sub', subText(c));
+    const net=document.getElementById('d-net');
+    if(net){ const v=fmtSigned(k.netPerHour); if(net.textContent!==v) net.textContent=v; net.classList.toggle('crit',(k.netPerHour||0)<0); net.classList.toggle('good',(k.netPerHour||0)>=0); }
+    setText('d-xp', fmt(k.xpPerHour)); setText('d-cap', fmt(k.captures)); setText('d-shiny', fmt(k.shinyCaught));
+    setText('d-balls', k.ballsPerCap!=null?String(k.ballsPerCap):'—');
+    setHTML('d-leadtext', leadTextHTML(c)); setHTML('d-boosts', boostsHTML(c));
+    setHTML('d-goals', goalsHTML(c)); setHTML('d-shiny-rows', shinyRowsHTML(c));
+    setHTML('d-pokedex', pokedexHTML(c)); setHTML('d-gold', goldBreakHTML(c)); setHTML('d-drops', dropsHTML(c)); setHTML('d-bag', bagHTML(c));
+    setHTML('d-prof', professionHTML(c));
+    const key=(L&&L.dex)+'|'+(c.hunt&&c.hunt.dex)+'|'+((c.hunt&&c.hunt.type)||'');   // cena só recria se o mon/hunt muda
+    if(key!==sceneKey){ makeScene(document.getElementById('scene-now'), c, 'sm'); sceneKey=key; }
+  }
+
+  // ---------- capturas (via store) ----------
+  const isCap=(e)=>['capture','rare_capture','shiny_capture'].includes(e.type);
+  async function loadCaptures(){ if(P){ try{ capData=(await P.getEvents()||[]).filter(isCap); }catch{ capData=[]; } } }
+  async function loadFeed(){ if(P){ try{ feed=(await P.getEvents()||[]); }catch{ feed=[]; } } }
+  function renderCaps(){
+    const body=document.getElementById('cap-body'); if(!body) return;
+    const wrap=body.closest('.tblwrap'); const st=wrap?wrap.scrollTop:0;   // preserva o scroll (não pula ao atualizar)
+    const scope = capF.acc==='__all' ? capData : capData.filter(e=>e.account===('acc'+sel));
+    let rows=scope.filter(e=>(!capF.rar||e.rarity===capF.rar)&&(!capF.shiny||e.shiny));
+    const k=capSort.k, dir=capSort.dir;
+    rows=rows.slice().sort((a,b)=>{ let x=a[k],y=b[k]; if(k==='rarity'){x=RARS.indexOf(x);y=RARS.indexOf(y);}
+      x=x==null?-Infinity:x; y=y==null?-Infinity:y; if(typeof x==='string'&&typeof y==='string') return x.localeCompare(y)*dir; return (x>y?1:x<y?-1:0)*dir; });
+    body.innerHTML=rows.slice(0,800).map(e=>{ const rc=e.shiny?'var(--gold)':rcol(e.rarity);
+      return `<tr class="${e.shiny?'sh':''}"><td>${e.dex?`<img src="${spr(e.dex)}" ${onerr}>`:''}${e.name||''}${e.shiny?' ✨':''}</td>
+        <td style="color:var(--mut)">${e.accountName||e.account||''}</td><td style="color:${rc};font-weight:600">${e.shiny?'Shiny':(e.rarity||'—')}</td>
+        <td class="num">${e.iv!=null?e.iv+'/192':'—'}</td><td class="num">${e.quality!=null?(+e.quality).toFixed(3):'—'}</td>
+        <td>${(e.ball||'—').replace(' Ball','')}</td><td style="color:var(--mut)">${timeStr(e.ts)}</td></tr>`; }).join('')
+      || `<tr><td colspan="7" style="text-align:center;color:var(--mut);padding:20px">Nenhuma captura com esse filtro.</td></tr>`;
+    if(wrap) wrap.scrollTop=st;
+    const cnt=document.getElementById('cap-cnt'); if(cnt) cnt.textContent=rows.length+' capturas';
+  }
+  function wireCaps(){
+    const fa=document.getElementById('f-acc'), fr=document.getElementById('f-rar'), fs=document.getElementById('f-shiny');
+    if(!fa) return; fa.value=capF.acc; fr.value=capF.rar; fs.checked=capF.shiny;
+    fa.onchange=()=>{ capF.acc=fa.value; renderCaps(); }; fr.onchange=()=>{ capF.rar=fr.value; renderCaps(); }; fs.onchange=()=>{ capF.shiny=fs.checked; renderCaps(); };
+    document.querySelectorAll('table.caps th').forEach(th=>th.onclick=()=>{ const k=th.dataset.k; capSort.dir=(capSort.k===k)?-capSort.dir:-1; capSort.k=k; renderCaps(); });
+    loadCaptures().then(renderCaps);
+  }
+
+  // ---------- jogo (a tela real vem do main; aqui é só o container/placeholder) ----------
+  function renderGame(){ const c=cs(sel);
+    return `<div class="mhead"><div><div class="ti">${c.name||('Conta '+sel)} — tela do jogo</div><div class="st">o jogo real roda aqui; as infos ficam na lateral</div></div>
+      <div class="sp"></div><button class="tbtn" id="game-back">◂ Voltar ao painel</button></div>
+      <div class="scene lg" id="scene-game"></div>`; }
+
+  // ---------- cena (cenário + líder e 1 adversário, sprites animados parados) ----------
+  const THEME={
+    dragon:{ bg:'radial-gradient(130% 100% at 50% -10%,#2b3170,#171c3e 55%,#0c1026)', ground:'linear-gradient(#38416e,#232a4d)', water:'#2f49a0' },
+    water:{ bg:'radial-gradient(130% 100% at 50% -10%,#1f4b6b,#123448 55%,#0a1f2c)', ground:'linear-gradient(#2a5f7a,#1a3d50)', water:'#2f7ca8' },
+    rock:{ bg:'radial-gradient(130% 100% at 50% -10%,#4a3720,#2f2415 55%,#1b140c)', ground:'linear-gradient(#5c4830,#3a2c1c)' },
+    ground:{ bg:'radial-gradient(130% 100% at 50% -10%,#4a3720,#2f2415 55%,#1b140c)', ground:'linear-gradient(#5c4830,#3a2c1c)' },
+    grass:{ bg:'radial-gradient(130% 100% at 50% -10%,#274b2c,#193320 55%,#0e2013)', ground:'linear-gradient(#3a5c34,#26401f)' },
+    poison:{ bg:'radial-gradient(130% 100% at 50% -10%,#3d2748,#271633 55%,#160c1f)', ground:'linear-gradient(#4a3560,#2e2040)' },
+    fire:{ bg:'radial-gradient(130% 100% at 50% -10%,#5a2a1e,#3a1c14 55%,#1f0f0a)', ground:'linear-gradient(#6e3a24,#3a2118)' },
+    _def:{ bg:'radial-gradient(130% 100% at 50% -10%,#26314b,#141c2b 55%,#0d121b)', ground:'linear-gradient(#34405c,#212a3e)' },
+  };
+  function makeScene(el, c, size){ if(!el||!c) return; const big=size==='lg';
+    const L=c.leader, h=c.hunt; const th=THEME[(h&&h.type)||'_def']||THEME._def;
+    if(!L && !h){ el.className='scene '+size; el.innerHTML=`<div class="bg" style="background:${th.bg}"></div><div class="empty">não logado</div>`; return; }
+    el.className='scene '+size; const leadPx=big?110:62, foePx=big?72:42;
+    el.innerHTML=`<div class="bg" style="background:${th.bg}"></div>
+      ${th.water?`<div class="ground" style="height:26%;background:${th.water};opacity:.5"></div>`:''}
+      <div class="ground" style="height:${big?22:22}%;background:${th.ground}"></div>
+      <div class="hud"><div class="n">${c.name||''}</div><div class="h">${h?('caçando '+h.name):''}</div></div>
+      <div class="live">ao vivo</div>
+      ${L?`<div class="actor" style="left:26%"><div class="sh"></div><img src="${anim(L.dex)}" ${onerr} style="width:${leadPx}px" onerror="this.onerror=null;this.src='${spr(L.dex)}'"></div>`:''}
+      ${h&&h.dex?`<div class="actor" style="left:62%"><div class="sh"></div><img src="${anim(h.dex)}" ${onerr} style="width:${foePx}px" onerror="this.onerror=null;this.src='${spr(h.dex)}'"></div>`:''}`;
+  }
+
+  // ---------- roteador ----------
+  function selectAcc(slot, goDetail){ sel=slot; if(goDetail) view='detail'; if(P) P.selectAccount(slot); render(); }
+  function render(){
+    if(sel==null && accounts.length) sel=accounts[0];
+    renderSide();
+    const m=document.getElementById('main');
+    sceneKey=null;
+    if(view==='dash') m.innerHTML=renderDash();
+    else if(view==='all') m.innerHTML=renderAll();
+    else if(view==='game') m.innerHTML=renderGame();
+    else m.innerHTML=renderDetail();
+    mounted={view,sel};
+    if(view==='dash'){ document.querySelectorAll('#dash-body tr[data-slot]').forEach(x=>x.onclick=()=>{ selectAcc(+x.dataset.slot, true); });
+      document.querySelectorAll('#dash-table th[data-sk]').forEach(th=>th.onclick=()=>{ const k=th.dataset.sk; dashSort.dir=(dashSort.k===k)?-dashSort.dir:-1; dashSort.k=k; scheduleRender(); });
+      document.querySelectorAll('[data-period]').forEach(b=>b.onclick=()=>{ capPeriod=+b.dataset.period; scheduleRender(); });
+      if(!feedLoaded && P){ feedLoaded=true; loadFeed().then(()=>{ if(view==='dash') scheduleRender(); }); } }
+    if(view==='all') document.querySelectorAll('.ovc').forEach(x=>x.onclick=()=>{ selectAcc(+x.dataset.slot, true); });
+    if(view==='detail'){ const dg=document.getElementById('det-game'); if(dg) dg.onclick=()=>{ view='game'; render(); }; if(cs(sel).loggedIn){ wireCaps(); tickDetail(cs(sel)); } }
+    if(view==='game'){ const gb=document.getElementById('game-back'); if(gb) gb.onclick=()=>{ view='detail'; render(); }; makeScene(document.getElementById('scene-game'), cs(sel), 'lg'); }
+    const mt=document.getElementById('mode-toggle'); if(mt) mt.style.display = view==='game' ? 'flex' : 'none';
+    const gr=document.getElementById('btn-grid'), fc=document.getElementById('btn-focus');
+    if(gr) gr.classList.toggle('on', gameMode==='grid'); if(fc) fc.classList.toggle('on', gameMode==='single');
+    const bg=document.getElementById('btn-game'); if(bg){ bg.classList.toggle('on', view==='game'); bg.textContent = view==='game' ? '▣ Ver painel' : '▦ Ver jogo'; }
+    if(P){ P.setGameMode(gameMode); P.setView(view==='game'?'game':((view==='all'||view==='dash')?'accounts':'detail'), sel); }
+  }
+
+  // ---------- alertas (som + toast) ----------
+  let soundOn=true, actx;
+  function tone(seq){ if(!soundOn) return; try{ actx=actx||new (window.AudioContext||window.webkitAudioContext)(); const t0=actx.currentTime;
+    for(const n of seq){ const o=actx.createOscillator(),g=actx.createGain(); o.type='sine'; o.frequency.value=n.f; o.connect(g); g.connect(actx.destination);
+      g.gain.setValueAtTime(.0001,t0+n.t); g.gain.exponentialRampToValueAtTime(.28,t0+n.t+.01); g.gain.exponentialRampToValueAtTime(.0001,t0+n.t+n.d); o.start(t0+n.t); o.stop(t0+n.t+n.d+.03); } }catch{} }
+  const SND={ shiny_capture:[{f:523,t:0,d:.12},{f:659,t:.1,d:.12},{f:784,t:.2,d:.14},{f:1047,t:.32,d:.25}], shiny_wild:[{f:659,t:0,d:.1},{f:988,t:.12,d:.2}], shiny_global:[{f:659,t:0,d:.1},{f:988,t:.12,d:.2}], rare_capture:[{f:440,t:0,d:.1},{f:587,t:.13,d:.16}],
+    warn:[{f:392,t:0,d:.13},{f:294,t:.15,d:.18}], crit:[{f:330,t:0,d:.14},{f:247,t:.17,d:.14},{f:196,t:.34,d:.24}], ok:[{f:523,t:0,d:.1},{f:784,t:.1,d:.16}] };
+  function alertInfo(ev){ const acc=ev.accountName||'';
+    switch(ev.type){
+      case 'shiny_global': return {msg:`✨ <b>${ev.player}</b> pegou ${ev.name} shiny!`, cls:'global', snd:SND.shiny_global};
+      case 'shiny_capture': return {msg:`✨ SHINY seu! ${acc} — ${ev.name}`, cls:'', snd:SND.shiny_capture};
+      case 'shiny_wild': return {msg:`✨ Shiny selvagem: ${ev.name} (${acc})`, cls:'', snd:SND.shiny_wild};
+      case 'balls_low': return {msg:`🔴 <b>${acc}</b>: bolas acabando (${fmt(ev.count)})`, cls:'warn', snd:SND.warn};
+      case 'potions_low': return {msg:`💊 <b>${acc}</b>: potions acabando (${fmt(ev.count)})`, cls:'warn', snd:SND.warn};
+      case 'potions_out': return {msg:`💊 <b>${acc}</b>: SEM POTIONS — o time pode desmaiar!`, cls:'crit', snd:SND.crit};
+      case 'died': return {msg:`💀 <b>${acc}</b>: ${ev.name||'seu pokémon'} desmaiou!`, cls:'crit', snd:SND.crit};
+      case 'sell_blocked': return {msg:`🛑 <b>${acc}</b>: bloqueei a venda de <b>${ev.what||'item protegido'}</b>. Desative a proteção nas ⚙ se quiser vender.`, cls:'crit', snd:SND.crit};
+      case 'disconnected': return {msg:`🔌 <b>${acc}</b>: desconectou${ev.reason==='session-replaced'?' (logou em outro lugar)':''}`, cls:'crit', snd:SND.crit};
+      case 'reconnected': return {msg:`✅ <b>${acc}</b>: reconectou`, cls:'ok', snd:SND.ok};
+      default: return {msg:`Raro: ${acc} — ${ev.name} ${ev.rarity||''} ${ev.iv?('IV '+ev.iv):''}`, cls:'rare', snd:SND.rare_capture};
+    } }
+  function toast(cls,msg){ const b=document.getElementById('toast'); const el=document.createElement('div'); el.className='t '+cls; el.innerHTML=msg; b.appendChild(el); setTimeout(()=>el.remove(),6500); }
+
+  // ---------- IPC ----------
+  if(P){
+    P.onAccounts((list)=>{ accounts=list||[]; if(sel==null||!accounts.includes(sel)) sel=accounts[0]||null; render(); });
+    P.onState((c)=>{ states[c.slot]=c; sampleTrend();
+      if(view==='detail' && c.slot===sel && mounted && mounted.view==='detail' && mounted.sel===sel && document.getElementById('d-net')){ tickDetail(c); }   // PATCH: sem flicker
+      else if(view==='dash' || view==='all' || ((view==='detail'||view==='game') && c.slot===sel)) scheduleRender();
+    });
+    P.onChat((m)=>{
+      // a MESMA mensagem de canal global (mundo/comércio/ajuda) chega por TODAS as contas logadas
+      // → deduplica por conteúdo numa janela curta pra não aparecer 2×/3×/4× no painel.
+      const now=Date.now(), key=(m.channel||'world')+'|'+(m.from||'')+'|'+(m.body||'');
+      for(let i=chatMsgs.length-1; i>=0 && i>chatMsgs.length-60; i--){ const x=chatMsgs[i];
+        if(((x.channel||'world')+'|'+(x.from||'')+'|'+(x.body||''))===key && now-(x._rx||0)<9000) return; }
+      m._rx=now; chatMsgs.push(m); if(chatMsgs.length>300) chatMsgs.shift(); renderChat(); });
+    P.onEvent((ev)=>{ if(ev&&ev.type){ feed.unshift(ev); if(feed.length>5000) feed.pop(); }
+      if(isCap(ev)){ capData.unshift(ev); if(view==='detail') renderCaps(); }
+      if(view==='dash' && (isCap(ev)||SHINY_TYPES.includes(ev.type))) scheduleRender(); });
+    P.onAlert((ev)=>{ const a=alertInfo(ev); tone(a.snd); toast(a.cls,a.msg); });
+    document.getElementById('btn-game').onclick=()=>{ view = view==='game'?'detail':'game'; render(); };
+    document.getElementById('btn-grid').onclick=()=>{ gameMode='grid'; render(); };
+    document.getElementById('btn-focus').onclick=()=>{ gameMode='single'; render(); };
+    document.getElementById('btn-overlay').onclick=()=>P.toggleOverlay();
+    document.getElementById('btn-min').onclick=()=>P.winMinimize();
+    document.getElementById('btn-close').onclick=()=>P.winClose();
+    document.getElementById('btn-gear').onclick=()=>document.getElementById('settings').classList.toggle('show');
+    initSettings();
+    P.snapshotAll && P.snapshotAll();
+  } else { mock(); }
+
+  const pb=document.getElementById('promo-banner');
+  if(pb) pb.onclick=()=>P ? P.openLanding() : window.open('https://idle247.antoniofleck.com.br/?ref=launcher','_blank','noopener');
+
+  async function initSettings(){ if(!P) return; const s=await P.getSettings(); soundOn=s.soundOn!==false;
+    document.getElementById('setRarity').value=s.alertRarity||'Rara'; document.getElementById('setIv').value=Math.round((s.ivAlertFrac||.9)*100);
+    document.getElementById('setShot').checked=s.screenshotOnShiny!==false; document.getElementById('setSound').checked=soundOn;
+    document.getElementById('setBalls').value=s.ballsAlert!=null?s.ballsAlert:200; document.getElementById('setPotions').value=s.potionsAlert!=null?s.potionsAlert:30;
+    document.getElementById('setSell').checked=s.sellProtect!==false; document.getElementById('setClean').checked=s.gameClean!==false;
+    const push=()=>{ soundOn=document.getElementById('setSound').checked; P.setSettings({ alertRarity:document.getElementById('setRarity').value, ivAlertFrac:(+document.getElementById('setIv').value||90)/100, screenshotOnShiny:document.getElementById('setShot').checked, soundOn, ballsAlert:+document.getElementById('setBalls').value||0, potionsAlert:+document.getElementById('setPotions').value||0, sellProtect:document.getElementById('setSell').checked, gameClean:document.getElementById('setClean').checked }); };
+    ['setRarity','setIv','setShot','setSound','setBalls','setPotions','setSell','setClean'].forEach(id=>document.getElementById(id).addEventListener('change',push));
+    const dg=document.getElementById('setDiag'); if(dg){ dg.checked=!!s.diagDump; dg.addEventListener('change',()=>P.setDiag(dg.checked)); }
+    const bd=document.getElementById('btnDump'); if(bd) bd.onclick=()=>P.openDumpFolder(); }
+
+  // ---------- mock (prévia sem o Electron) ----------
+  function mock(){
+    accounts=[1,2]; sel=1;
+    states[1]={slot:1,name:'Treinador 1',loggedIn:true,hunt:{name:'Dratini',dex:147,type:'dragon'},
+      leader:{name:'Vileplume',dex:45,level:159,iv:139,ivMax:192,quality:1.763,rarity:'Lendária',power:3477},
+      kpi:{netPerHour:211022,xpPerHour:577034,captures:115,shinyCaught:0,ballsPerCap:89},
+      boosts:[{emoji:'💎',name:'VIP',until:Date.now()+42*60000},{emoji:'⚡',name:'XP Boost',until:Date.now()+12*60000}],
+      goals:{shinyCard:{species:'Dratini',kills:10351,target:15000,pct:69},pokedexBonus:{species:'Dratini',kills:100,target:100,done:true,pct:100},streak:{kills:351,target:1000,points:10,pct:35}},
+      shiny:{found:30,caught:0,lost:30,ballsOnShiny:83,foundPerHour:4.71},prof:{photos:38},mail:{count:3,unread:0,gifts:3},caught:[147,148,149,45,94,130],
+      pokedex:{caught:53,total:299,missing:246,source:'server'},goldCalc:{lootGold:6142,captureGold:30000,ballCost:20930,net:15212,perHour:211022},
+      bestCatch:{name:'Dratini',dex:147,iv:151,quality:1.457,rarity:'Rara',shiny:false},
+      trainer:{level:437,rank:2530,totalPlayers:93781},accountGold:2537919,diamonds:0,
+      profession:{profession:'prestige',rank:1,rankKey:'D',rankName:'Aventureiro',maxRank:5,speciesCount:85,pictures:51,catchBonusPct:6,nextStep:{toRank:2,toRankKey:'C',toRankName:'Especialista',species:{have:85,need:100},pictures:{have:50,need:50},kills:[{type:'FIRE',have:200,need:200},{type:'WATER',have:120,need:200},{type:'GRASS',have:200,need:200}]}},
+      recent:[{name:'Dratini',dex:147,iv:98,rarity:'Comum',shiny:false,ts:Date.now()-90000},{name:'Dratini',dex:147,iv:151,rarity:'Rara',shiny:false,ts:Date.now()-3600000}],
+      ballList:[{name:'Ultra Ball',qty:12483,icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/ultra-ball.png'},{name:'Great Ball',qty:340,icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/great-ball.png'}],
+      bag:{total:6,items:[
+        {name:'Fire Tail',category:'loot',qty:22814,icon:'https://pokexguides.com/images/items/drops/Fire_Tail.png'},
+        {name:'Magma Foot',category:'loot',qty:11457,icon:'https://pokexguides.com/images/items/drops/Magma_Foot.png'},
+        {name:'Strange Pheromone',category:'loot',qty:3,icon:'https://pokexguides.com/images/items/drops/Essence_of_Fire.png'},
+        {name:'Rare Pokémon Picture',category:'loot',qty:51,icon:'https://pokexguides.com/images/items/drops/Squirtle_Hull.png'},
+        {name:'Shiny Venusaur Card',category:'card',qty:1,icon:'https://pokexguides.com/images/items/drops/Luck_Medallion.png'},
+        {name:'Fire Stone',category:'stone',qty:13,icon:'https://pokexguides.com/images/items/evolutions/Fire_Stone.gif'},
+        {name:'Ultimate Potion',category:'heal',qty:5890,icon:'https://pokexguides.com/images/items/drops/Magikarp_Fin.png'}]},
+      live:{sinceMs:6.4*3600000,killsPerHour:11840,byRarity:{Comum:78,Incomum:24,Rara:11,'Épica':2},
+        loot:{54:{itemId:54,name:'Fire Tail',qty:1122,gold:148104,icon:'https://pokexguides.com/images/items/drops/Fire_Tail.png'},82:{itemId:82,name:'Magma Foot',qty:211,gold:105500,icon:'https://pokexguides.com/images/items/drops/Magma_Foot.png'},53:{itemId:53,name:'Fire Stone',qty:7,gold:35000,icon:'https://pokexguides.com/images/items/evolutions/Fire_Stone.gif'},46:{itemId:46,name:'Essence of Fire',qty:6038,gold:6038,icon:'https://pokexguides.com/images/items/drops/Essence_of_Fire.png'}}}};
+    states[2]={slot:2,name:'Treinador 2',loggedIn:true,hunt:{name:'Dragonair',dex:148,type:'dragon'},
+      leader:{name:'Gyarados',dex:130,level:98,iv:159,ivMax:192,quality:1.799,rarity:'Lendária',power:3120},
+      kpi:{netPerHour:-89640,xpPerHour:73440,captures:152,shinyCaught:0,ballsPerCap:63.8},
+      boosts:[{emoji:'💰',name:'Loot Boost',until:Date.now()+65*60000}],
+      goals:{shinyCard:{species:'Dragonair',kills:8610,target:15000,pct:57},pokedexBonus:{species:'Dragonair',kills:100,target:100,done:true,pct:100},streak:{kills:692,target:1000,points:9,pct:69}},
+      shiny:{found:27,caught:0,lost:27,ballsOnShiny:58,foundPerHour:2.6},prof:{photos:51},mail:{count:0,unread:0,gifts:0},caught:Array.from({length:53},(x,i)=>i+1),
+      pokedex:{caught:53,total:299,missing:246},goldCalc:{lootGold:44000,captureGold:12000,ballCost:24000,net:32000,perHour:-89640},
+      bestCatch:{name:'Gyarados',dex:130,iv:159,quality:1.799,rarity:'Lendária',shiny:false},
+      trainer:{level:512,rank:1904,totalPlayers:93781},accountGold:4102338,diamonds:12,
+      recent:[{name:'Dragonair',dex:148,iv:120,rarity:'Incomum',shiny:false,ts:Date.now()-45000}],
+      ballList:[{name:'Great Ball',qty:8420}],
+      bag:{total:4,items:[{name:'Earth Shard',category:'loot',qty:2010},{name:'Band Aid',category:'heal',qty:640},{name:'Future Orb',category:'card',qty:3},{name:'Water Stone',category:'stone',qty:9}]},
+      live:{sinceMs:2*3600000,killsPerHour:9200,byRarity:{Comum:120,Incomum:26,Rara:6},
+        loot:{80:{itemId:80,name:'Luck Medallion',qty:2010,gold:40200,icon:'https://pokexguides.com/images/items/drops/Luck_Medallion.png'},81:{itemId:81,name:'Magikarp Fin',qty:640,gold:12800,icon:'https://pokexguides.com/images/items/drops/Magikarp_Fin.png'},124:{itemId:124,name:'Squirtle Hull',qty:8,gold:1056,icon:'https://pokexguides.com/images/items/drops/Squirtle_Hull.png'}}}};
+    capData=[
+      {account:'acc1',accountName:'Treinador 1',type:'rare_capture',name:'Dratini',dex:147,iv:151,quality:1.457,rarity:'Rara',ball:'Ultra Ball',shiny:false,ts:Date.now()-3600000},
+      {account:'acc1',accountName:'Treinador 1',type:'capture',name:'Dratini',dex:147,iv:98,quality:1.074,rarity:'Comum',ball:'Ultra Ball',shiny:false,ts:Date.now()-4000000},
+      {account:'acc2',accountName:'Treinador 2',type:'rare_capture',name:'Gengar',dex:94,iv:133,quality:1.32,rarity:'Rara',ball:'Ultra Ball',shiny:false,ts:Date.now()-5000000},
+    ];
+    { let t0=Date.now()-45*15000; for(let i=0;i<45;i++){ trend.push({ts:t0+i*15000,
+      net:110000+Math.round(Math.sin(i/6)*45000)+i*400, xp:590000+Math.round(Math.cos(i/5)*70000), cap:Math.round(i*2.4)}); } lastSample=Date.now(); }
+    chatMsgs=[
+      {channel:'help',from:'Luzg0dlike',level:19,vip:false,body:'Como eu evoluo poliwag? procuro só o stone'},
+      {channel:'world',from:'bazalenda',level:253,vip:true,body:'quantas contas dá pra abrir ao msm tempo?'},
+      {channel:'trade',from:'Shrova',level:177,vip:false,body:'vendo Dratini shiny, chama na dm'},
+      {channel:'world',from:'kodak',level:392,vip:true,body:'ESTAMOS ON NA TV/TV !!!'},
+      {channel:'help',from:'MelanieEX',level:333,vip:false,body:'pq só alguns dropam pheromone?'},
+    ];
+    feedLoaded=true;
+    feed=[
+      {type:'shiny_capture',account:'acc1',accountName:'Treinador 1',name:'Gyarados',dex:130,ts:Date.now()-120000},
+      {type:'shiny_global',player:'Treinador Global',name:'Alakazam',pokemonName:'Alakazam',dex:65,ts:Date.now()-300000},
+      {type:'shiny_wild',account:'acc2',accountName:'Treinador 2',name:'Dragonair',dex:148,ts:Date.now()-600000},
+      {type:'rare_capture',account:'acc1',accountName:'Treinador 1',name:'Dratini',dex:147,iv:151,rarity:'Rara',ts:Date.now()-3600000},
+    ];
+    const h=(location.hash||'').replace('#','');
+    if(h.indexOf('detail')>=0 || h.indexOf('sim')>=0) view='detail'; else if(h.indexOf('game')>=0) view='game';
+    render();
+    // #sim: simula ticks do jogo (bola tacada) pra testar o flicker sem o Electron
+    if(h.indexOf('sim')>=0){ setInterval(()=>{ const c=states[sel]; if(!c) return;
+      c.kpi.captures++; c.kpi.xpPerHour=Math.max(0,(c.kpi.xpPerHour||0)+Math.round((Math.random()-.5)*3000)); c.kpi.netPerHour=(c.kpi.netPerHour||0)+Math.round((Math.random()-.5)*5000);
+      if(view==='detail' && mounted && mounted.view==='detail' && document.getElementById('d-net')) tickDetail(cs(sel)); else scheduleRender(); }, 600); }
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            command: npm run dist -- --x64
+            artifact: Poke-Idle-Launcher-Windows-x64
+            files: dist/*.exe
+          - os: ubuntu-24.04
+            command: npm run dist:linux -- --x64
+            artifact: Poke-Idle-Launcher-Linux-x64
+            files: dist/*.AppImage
+          - os: ubuntu-24.04
+            command: npm run dist:linux -- --arm64
+            artifact: Poke-Idle-Launcher-Linux-arm64
+            files: dist/*.AppImage
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - name: Build package
+        run: ${{ matrix.command }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.files }}
+          generate_release_notes: true
