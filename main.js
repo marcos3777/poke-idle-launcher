@@ -146,7 +146,7 @@ let tokenVault = null;
 async function saveToken(g) {
   try {
     if (!tokenVault) return;
-    const tok = await g.view.webContents.executeJavaScript(`sessionStorage.getItem(${JSON.stringify(TOKEN_KEY)})`, true);
+    const tok = await g.view.webContents.executeJavaScript(`sessionStorage.getItem(${JSON.stringify(TOKEN_KEY)})`, false);
     tokenVault.save(g.slot, tok);
   } catch {}
 }
@@ -158,12 +158,12 @@ function attachTokenRestore(g) {
   g.view.webContents.on('did-finish-load', async () => {
     if (tried) return;
     try {
-      const has = await g.view.webContents.executeJavaScript(`sessionStorage.getItem(${JSON.stringify(TOKEN_KEY)})`, true);
+      const has = await g.view.webContents.executeJavaScript(`sessionStorage.getItem(${JSON.stringify(TOKEN_KEY)})`, false);
       if (has) return;   // já logado nesta sessão
       const saved = loadToken(g.slot);
       if (!saved) return;
       tried = true;
-      await g.view.webContents.executeJavaScript(`sessionStorage.setItem(${JSON.stringify(TOKEN_KEY)}, ${JSON.stringify(saved)})`, true);
+      await g.view.webContents.executeJavaScript(`sessionStorage.setItem(${JSON.stringify(TOKEN_KEY)}, ${JSON.stringify(saved)})`, false);
       g.view.webContents.reload();   // recarrega já com o token → entra logado, sem relogar
     } catch {}
   });
@@ -177,7 +177,6 @@ let selectedSlot = null;
 let gameMode = 'grid';     // 'grid' | 'single'
 let view = 'accounts';     // 'accounts' | 'captures'
 let overlayWin = null;
-let focusedSlot = null;    // qual tela do jogo o usuário está usando (pra devolver o foco se o painel roubar)
 const globalSeen = new Map();
 let diagOn = false;        // modo diagnóstico: grava os frames crus do WS pra realinhar o parser
 let dumpPath = null;
@@ -250,28 +249,16 @@ function injectGameUX(g) {
     const wc = g.view.webContents; if (!wc || wc.isDestroyed()) return;
     const clean = store.getSettings().gameClean !== false;
     const js = `(function(){try{var s=document.getElementById('pcz-ux');if(!s){s=document.createElement('style');s.id='pcz-ux';s.textContent=${JSON.stringify(GAME_UX_CSS)};(document.head||document.documentElement).appendChild(s);}document.documentElement.classList.toggle('pcz-clean', ${clean});}catch(e){}})()`;
-    wc.executeJavaScript(js, true).catch(() => {});
+    wc.executeJavaScript(js, false).catch(() => {});
   } catch {}
 }
 
-// ---------------- helpers de UX injetados no jogo (foco + seletor de nível) ----------------
-// NÃO automatiza gameplay nem lê dado da conta: (1) devolve o foco a um input do jogo que perdeu
-// o foco por re-render enquanto a tela ainda está focada; (2) adiciona um <select> de faixa de
-// nível ao filtro do Mapa (mantém os inputs de/até, só preenche via setter React-aware).
+// ---------------- helper de UX injetado no jogo (seletor de nível no Mapa) ----------------
+// NÃO automatiza gameplay nem lê dado da conta: adiciona um <select> de faixa de nível ao filtro
+// do Mapa (mantém os inputs de/até, só preenche via setter React-aware).
 const GAME_HELPERS_JS = `(function(){
   if(window.__pczHelpers) return; window.__pczHelpers=1;
   try{
-    var sel=null;
-    document.addEventListener('focusout', function(e){
-      var el=e.target; if(!el||(el.tagName!=='INPUT'&&el.tagName!=='TEXTAREA')) return;
-      if(e.relatedTarget) return;
-      try{ sel=[el.selectionStart,el.selectionEnd]; }catch(_){}
-      requestAnimationFrame(function(){
-        if(!document.hasFocus()) return;                 // saiu da tela do jogo → respeita
-        if(document.activeElement===el || !document.contains(el)) return;
-        try{ el.focus({preventScroll:true}); if(sel&&el.setSelectionRange) el.setSelectionRange(sel[0],sel[1]); }catch(_){}
-      });
-    }, true);
     var nset=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
     function setIn(i,v){ try{ nset.call(i,String(v)); i.dispatchEvent(new Event('input',{bubbles:true})); }catch(_){} }
     function enh(){ try{
@@ -636,13 +623,6 @@ function createGame(slot) {
   attachCapture(g);   // antes do load, pra pegar o WS desde o começo
   // assim que a página carrega: injeta o declutter da UI + (com folga pro token) puxa o snapshot REST
   g.view.webContents.on('did-finish-load', () => { injectGameUX(g); injectGameHelpers(g); setTimeout(() => pollServer(g).catch(() => {}), 3500); });
-  // FOCO: rastreia qual tela do jogo o usuário está usando e devolve o foco se o painel roubar num tick.
-  g.view.webContents.on('focus', () => { focusedSlot = g.slot; });
-  g.view.webContents.on('blur', () => {
-    if (view === 'game' && focusedSlot === g.slot && win && win.isFocused()) {
-      setImmediate(() => { try { const wc = g.view.webContents; if (wc && !wc.isDestroyed() && !wc.isFocused()) wc.focus(); } catch {} });
-    }
-  });
   g.view.webContents.loadURL(GAME_URL).catch((e) => console.error('[coletor] loadURL', slot, e && e.message));
   win.contentView.addChildView(g.view);
   g.view.setVisible(false);
