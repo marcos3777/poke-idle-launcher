@@ -282,7 +282,7 @@
   // estado da UI
   const states={};       // slot -> compactState (cru do main)
   let accounts=[];        // [slot,...]
-  let view='dash', sel=null, gameMode='grid';
+  let view='dash', sel=null, gameMode='grid', sentUI=null;
   let capData=[];         // capturas do store (getEvents)
   let feed=[];            // TODOS os eventos do store (pro feed de shiny do dashboard)
   let feedLoaded=false;
@@ -733,7 +733,10 @@
     const gr=document.getElementById('btn-grid'), fc=document.getElementById('btn-focus');
     if(gr) gr.classList.toggle('on', gameMode==='grid'); if(fc) fc.classList.toggle('on', gameMode==='single');
     const bg=document.getElementById('btn-game'); if(bg){ bg.classList.toggle('on', view==='game'); bg.textContent = view==='game' ? '▣ Ver painel' : '▦ Ver jogo'; }
-    if(P){ P.setGameMode(gameMode); P.setView(view==='game'?'game':((view==='all'||view==='dash')?'accounts':'detail'), sel); }
+    // FOCO: só manda pro main o que MUDOU — re-mandar view/modo em todo render fazia o main
+    // re-esconder/re-mostrar as telas do jogo e roubava o foco do input (bug do foco).
+    if(P){ const gm=gameMode, vw=view==='game'?'game':((view==='all'||view==='dash')?'accounts':'detail');
+      if(!sentUI || sentUI.gm!==gm || sentUI.vw!==vw || sentUI.sel!==sel){ sentUI={gm,vw,sel}; P.setGameMode(gm); P.setView(vw, sel); } }
   }
 
   // ---------- alertas (som + toast) ----------

@@ -216,21 +216,34 @@ function _tiles(count, x, y, w, h) {
 function tileRects(count, x, y, w, h) {
   return _tiles(count, x, y, w, h).map((r) => ({ x: r.x + GAP, y: r.y + GAP, width: Math.max(r.width - GAP * 2, 20), height: Math.max(r.height - GAP * 2, 20) }));
 }
+// ⚠️ FOCO: esconder/mover/re-addChildView uma WebContentsView FOCADA rouba o foco OS do
+// input do jogo (era o bug "input desfoca sozinho": o painel re-mandava view/modo em todo
+// render e cada layout() redundante escondia/re-adicionava as telas). Por isso o layout é
+// IDEMPOTENTE: calcula o alvo e só aplica a DIFERENÇA; não re-adiciona child view
+// (a ordem z já fica certa desde a criação: painel primeiro, jogos por cima).
+function setViewBounds(v, r) {
+  try { const c = v.getBounds(); if (c.x === r.x && c.y === r.y && c.width === r.width && c.height === r.height) return; } catch {}
+  v.setBounds(r);
+}
 function layout() {
   if (!win) return;
   const b = win.getContentBounds();
-  dashView.setBounds({ x: 0, y: 0, width: b.width, height: b.height });   // a UI (app.html) ocupa a janela toda
-  games.forEach((g) => g.view.setVisible(false));                          // coleta segue; telas do jogo escondidas
+  setViewBounds(dashView, { x: 0, y: 0, width: b.width, height: b.height });   // a UI (app.html) ocupa a janela toda
+  const target = new Map();   // slot -> rect das telas que devem estar VISÍVEIS
   if (view === 'game') {
     const x0 = SIDE_W, y0 = BAR, w = Math.max(b.width - x0, 100), h = Math.max(b.height - y0, 100);
     if (gameMode === 'grid') {                                             // GRADE: todas as telas do jogo em 2×2 (1–4)
       const rects = tileRects(games.length, x0, y0, w, h);
-      games.forEach((g, i) => { const r = rects[i]; if (!r) return; g.view.setBounds(r); g.view.setVisible(true); win.contentView.addChildView(g.view); });
+      games.forEach((g, i) => { if (rects[i]) target.set(g.slot, rects[i]); });
     } else if (selectedSlot != null) {                                     // FOCO: só a conta selecionada, tela cheia à direita
-      const g = games.find((x) => x.slot === selectedSlot);
-      if (g) { g.view.setBounds({ x: x0, y: y0, width: w, height: h }); g.view.setVisible(true); win.contentView.addChildView(g.view); }
+      if (games.some((x) => x.slot === selectedSlot)) target.set(selectedSlot, { x: x0, y: y0, width: w, height: h });
     }
   }
+  games.forEach((g) => {
+    const r = target.get(g.slot);
+    if (r) { setViewBounds(g.view, r); if (g._shown !== true) { g.view.setVisible(true); g._shown = true; } }
+    else if (g._shown !== false) { g.view.setVisible(false); g._shown = false; }
+  });
 }
 
 // ---------------- injeção de UX no jogo (CSS reversível — nada de gameplay/DOM de dado) ----------------
@@ -624,8 +637,8 @@ function createGame(slot) {
   // assim que a página carrega: injeta o declutter da UI + (com folga pro token) puxa o snapshot REST
   g.view.webContents.on('did-finish-load', () => { injectGameUX(g); injectGameHelpers(g); setTimeout(() => pollServer(g).catch(() => {}), 3500); });
   g.view.webContents.loadURL(GAME_URL).catch((e) => console.error('[coletor] loadURL', slot, e && e.message));
-  win.contentView.addChildView(g.view);
-  g.view.setVisible(false);
+  win.contentView.addChildView(g.view);   // única vez — layout() não re-adiciona (roubaria o foco)
+  g.view.setVisible(false); g._shown = false;
   games.push(g);
   return g;
 }
@@ -666,9 +679,16 @@ function toggleOverlay() {
 // ---------------- IPC ----------------
 ipcMain.handle('addView', () => addGame());
 ipcMain.handle('removeView', (_e, slot) => removeGame(slot));
-ipcMain.handle('selectAccount', (_e, slot) => { selectedSlot = slot; if (view === 'accounts' && gameMode === 'single') layout(); return selectedSlot; });
-ipcMain.handle('setGameMode', (_e, m) => { gameMode = m === 'single' ? 'single' : 'grid'; layout(); return gameMode; });
-ipcMain.handle('setView', (_e, v, slot) => { view = (v === 'game') ? 'game' : (v === 'detail' ? 'detail' : 'accounts'); if (slot != null) selectedSlot = slot; layout(); return view; });
+// ⚠️ FOCO: os 3 handlers abaixo são NO-OP quando nada mudou — o painel re-manda o estado da
+// UI em todo render (a cada 'state'), e um layout() redundante roubava o foco do jogo.
+ipcMain.handle('selectAccount', (_e, slot) => { if (slot === selectedSlot) return selectedSlot; selectedSlot = slot; layout(); return selectedSlot; });
+ipcMain.handle('setGameMode', (_e, m) => { const nm = m === 'single' ? 'single' : 'grid'; if (nm === gameMode) return gameMode; gameMode = nm; layout(); return gameMode; });
+ipcMain.handle('setView', (_e, v, slot) => {
+  const nv = (v === 'game') ? 'game' : (v === 'detail' ? 'detail' : 'accounts');
+  const ns = slot != null ? slot : selectedSlot;
+  if (nv === view && ns === selectedSlot) return view;
+  view = nv; selectedSlot = ns; layout(); return view;
+});
 ipcMain.handle('setAccountName', (_e, slot, name) => {
   const s = store.getSettings(); const names = Object.assign({}, s.accountNames || {});
   if (name && name.trim()) names[String(slot)] = name.trim().slice(0, 20); else delete names[String(slot)];
