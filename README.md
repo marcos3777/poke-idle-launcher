@@ -15,7 +15,7 @@ Acompanhe até quatro contas em uma só janela, com painel de métricas ao vivo,
 
 ## Baixar
 
-### ⬇ [Windows (.exe)](https://github.com/AntonioFleck/poke-idle-launcher/releases/latest/download/Poke-Idle-Launcher-Windows-x64.exe) &nbsp;·&nbsp; [Linux x64 (.AppImage)](https://github.com/AntonioFleck/poke-idle-launcher/releases/latest/download/Poke-Idle-Launcher-Linux-x64.AppImage) &nbsp;·&nbsp; [Linux ARM (.AppImage)](https://github.com/AntonioFleck/poke-idle-launcher/releases/latest/download/Poke-Idle-Launcher-Linux-arm64.AppImage)
+### ⬇ [Windows (.exe)](https://github.com/AntonioFleck/poke-idle-launcher/releases/latest/download/Poke-Idle-Launcher-Windows-x64.exe) &nbsp;·&nbsp; [Linux x64 (.AppImage)](https://github.com/AntonioFleck/poke-idle-launcher/releases/latest/download/Poke-Idle-Launcher-Linux-x86_64.AppImage) &nbsp;·&nbsp; [Linux ARM (.AppImage)](https://github.com/AntonioFleck/poke-idle-launcher/releases/latest/download/Poke-Idle-Launcher-Linux-arm64.AppImage)
 
 Os links acima **baixam sempre a versão mais recente**. Todas as versões ficam em **[Releases](../../releases/latest)**. Como o executável não tem assinatura digital paga, o Windows pode mostrar um aviso na primeira abertura (SmartScreen → *Mais informações* → *Executar assim mesmo*).
 
