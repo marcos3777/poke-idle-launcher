@@ -18,7 +18,7 @@ const ORIGIN = 'https://poke.idleworld.online';
 // (nunca inclui POST / nada que mude estado do jogo)
 const ENDPOINTS = {
   pokedex: '/api/game/pokedex',       // { unlockKills, species:[...] } — pokédex autoritativa
-  allPokes: '/api/game/all-pokes',    // { entries:[...] } — coleção inteira (IV/quality)
+  allPokes: '/api/game/all-pokes',    // { total, entries:[{dexId,name,tier,count}] } — RESUMO por espécie (NÃO tem IV individual; o individual vem no frame WS `pokes`)
   balls: '/api/game/balls',           // { catalog:[{id,name,priceGold,catchRate,iconUrl}], counts:{id:qtd} }
   usedBalls: '/api/game/used-balls',  // bolas gastas (autoritativo -> custo real)
   profile: '/api/game/profile',       // { level, ... } — nível do treinador
@@ -161,4 +161,34 @@ function normStreak(s) {
   };
 }
 
-module.exports = { ORIGIN, ENDPOINTS, pullSnapshot, normPokedex, normBalls, normProfile, normProfessions, normStreak };
+// ---- MERCADO GLOBAL (sob demanda, disparado por clique do usuário) ----
+// GET /api/game/market?category=Pokemon → { charId, listings:[{ id, capturedId, speciesId,
+// name:"Paras Lv.1", shiny, level, price, currency:"GOLD"|"DIAMONDS", offerOnly, hasOffers,
+// sellers, stats{...}, ivTotal, quality, power, type1, type2 }]}. Já traz IV/quality reais.
+async function pullMarket(wc, category) {
+  if (!wc || wc.isDestroyed()) return null;
+  const path = '/api/game/market?category=' + encodeURIComponent(category || 'Pokemon');
+  try {
+    const res = await wc.executeJavaScript(buildPullScript({ market: path }), true);
+    if (!res) return null;
+    if (res.__noauth) return { __noauth: true };
+    if (res.__error) return { __error: res.__error };
+    return res.market || null;
+  } catch (e) { return { __error: e && e.message }; }
+}
+// normaliza as listagens (tira o "Lv.N" do nome; mantém level/price/currency). Sem dex/rarity — o main enriquece.
+function normMarket(json) {
+  if (!json || !Array.isArray(json.listings)) return null;
+  const stripLv = (n) => String(n || '').replace(/^shiny\s+/i, '').replace(/\s*Lv\.?\s*\d+\s*$/i, '').trim();
+  const listings = json.listings.map((x) => ({
+    id: x.id, capturedId: x.capturedId, speciesId: x.speciesId,
+    name: stripLv(x.name), level: x.level, shiny: !!x.shiny,
+    iv: x.ivTotal, ivMax: 192, quality: x.quality, power: x.power,
+    type1: x.type1 || null, type2: x.type2 || null, stats: x.stats || null,
+    price: x.price, currency: x.currency || 'GOLD', offerOnly: !!x.offerOnly, hasOffers: !!x.hasOffers,
+    sellers: x.sellers, at: x.at,
+  })).filter((x) => x.speciesId != null);
+  return { charId: json.charId || null, count: listings.length, listings };
+}
+
+module.exports = { ORIGIN, ENDPOINTS, pullSnapshot, normPokedex, normBalls, normProfile, normProfessions, normStreak, pullMarket, normMarket };

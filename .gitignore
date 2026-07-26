@@ -19,3 +19,8 @@ auth-debug-*.json
 # OS / editor
 .DS_Store
 Thumbs.db
+
+# DOM probe (contém DOM real do jogo — nunca commitar)
+dom-probe-*.html
+hud-probe.json
+*-probe.json

@@ -20,6 +20,25 @@ function rarityFromQuality(q) {
 }
 const RARITY_ORDER = ['Fraca', 'Comum', 'Incomum', 'Rara', 'Épica', 'Lendária', 'Mythic', 'Ancient', 'Divine'];
 
+// "Melhor catch": a QUALITY manda (um Lendário, quality >= 1.7, vale mais que IV alto),
+// mas um IV quase perfeito dá um bônus que deixa um Épico (quality < 1.7) com IV ~180+
+// competir de igual pra igual com um Lendário. Shiny sempre no topo. Usado no painel
+// geral, na melhor captura da sessão e no agregado do dia — fonte única do critério.
+const NEAR_PERFECT_IV = 180;   // limiar do "IV beirando perfeito" (de 192)
+function catchScore(x) {
+  if (!x) return -Infinity;
+  const q = +x.quality || 0;
+  const iv = +(x.iv != null ? x.iv : x.ivTotal) || 0;
+  return (x.shiny ? 100 : 0) + q + Math.max(0, iv - 150) / 42 * 0.20;
+}
+// Merece card no hover: Lendária+ (quality >= 1.7), Épica com IV quase perfeito, ou shiny.
+function isNotableCatch(x) {
+  if (!x) return false;
+  const q = +x.quality || 0;
+  const iv = +(x.iv != null ? x.iv : x.ivTotal) || 0;
+  return !!x.shiny || q >= 1.7 || (q >= 1.5 && iv >= NEAR_PERFECT_IV);
+}
+
 function parseFrame(payload) { try { return JSON.parse(payload); } catch { return null; } }
 
 function emptyLive() {
@@ -63,7 +82,14 @@ function applyMessage(state, m) {
       break;
     }
     case 'field':   // ruído de movimento; só olhamos se há shiny selvagem na tela
-      if (Array.isArray(m.mobs)) state.shinyOnField = m.mobs.some((x) => x && x.shiny && !x.dead);
+      if (Array.isArray(m.mobs)) {
+        const shinyMob = m.mobs.find((x) => x && x.shiny && !x.dead);
+        const was = state.shinyOnField;
+        state.shinyOnField = !!shinyMob;
+        if (shinyMob && !was) {   // BORDA (false→true): shiny apareceu na tela AGORA — não repete a cada frame
+          events.push({ type: 'shiny_field', cap: { name: shinyMob.speciesName || shinyMob.name || null, speciesId: shinyMob.speciesId || shinyMob.dex || shinyMob.pokeId || null } });
+        }
+      }
       break;
     case 'pokes': {
       state.team = m.list || [];
@@ -100,9 +126,10 @@ function applyMessage(state, m) {
       state.pokeIds.add(p.id);
       if (p.speciesId) state.caughtSpecies.add(p.speciesId);
       const cap = {
-        name: p.name, speciesId: p.speciesId, level: p.level, iv: p.ivTotal, ivMax: 192,
+        id: p.id, name: p.name, speciesId: p.speciesId, level: p.level, iv: p.ivTotal, ivMax: 192,
         quality: p.quality, power: p.power, shiny: !!p.shiny, rarity: rarityFromQuality(p.quality),
         ball: state._lastBall || null, sellValue: p.sellValue,
+        type1: p.type1 || null, type2: p.type2 || null,
         evolvesTo: p.evolvesToName || null, evolveNeedLevel: p.evolveNeedLevel || null,
         hasEvolution: !!p.hasEvolution, stats: p.stats || null,
       };
@@ -111,8 +138,7 @@ function applyMessage(state, m) {
       state.live.captureGold += (p.sellValue || 0);   // ouro estimado se vender a captura
       if (p.shiny) { state.live.shinyCaptures++; state.live.shinyCaught++; }
       if (cap.rarity) state.live.byRarity[cap.rarity] = (state.live.byRarity[cap.rarity] || 0) + 1;
-      if (p.quality != null && (!state.bestCatch || p.quality > state.bestCatch.quality ||
-          (p.quality === state.bestCatch.quality && (p.ivTotal || 0) > (state.bestCatch.iv || 0)))) state.bestCatch = cap;
+      if (p.quality != null && (!state.bestCatch || catchScore(cap) > catchScore(state.bestCatch))) state.bestCatch = cap;
       break;
     }
     case 'field-kill': {
@@ -176,6 +202,7 @@ function spriteUrl(dexId) { return dexId ? `https://raw.githubusercontent.com/Po
 function animatedSpriteUrl(dexId) { return dexId ? `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/${dexId}.gif` : null; }
 
 module.exports = {
-  rarityFromQuality, RARITY_ORDER, parseFrame, applyMessage, newState, emptyLive,
+  rarityFromQuality, RARITY_ORDER, catchScore, isNotableCatch, NEAR_PERFECT_IV,
+  parseFrame, applyMessage, newState, emptyLive,
   spriteUrl, animatedSpriteUrl,
 };

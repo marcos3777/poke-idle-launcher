@@ -14,6 +14,7 @@ const gp = require('./game-parse');
 const calc = require('./calc');
 const api = require('./server-api');
 const { createTokenVault } = require('./token-vault');
+const { ShinyHuntBot } = require('./shiny-hunt-bot');
 
 const SERVER_MODE = process.argv.includes('--server') || process.env.POKE_SERVER_MODE === '1';
 if (SERVER_MODE && process.platform === 'linux') app.commandLine.appendSwitch('password-store', 'basic');
@@ -93,7 +94,12 @@ async function loadCreatures() {
   try {
     const j = await (await fetch('https://poke.idleworld.online/game/creatures.json')).json();
     const arr = Array.isArray(j) ? j : (j.creatures || Object.values(j));
-    creatures = arr.map((c) => ({ dex: c.pokeId, name: c.name, type1: c.type1, type2: c.type2 || null, huntLevel: c.huntLevel, rarity: c.rarity }));
+    creatures = arr.map((c) => ({ dex: c.pokeId, name: c.name, type1: c.type1, type2: c.type2 || null, huntLevel: c.huntLevel, rarity: c.rarity,
+      sellValue: c.sellValue || 0, xpKill: c.experience || 0,
+      // stats base + tipos dos golpes: usados pela sugestão de leveling (velocidade de kill = bulk do alvo; cobertura de tipo)
+      baseHp: c.baseHp || 0, baseDef: c.baseDef || 0, baseSpDef: c.baseSpDef || 0,
+      moveTypes: [...new Set((c.attacks || []).map((a) => a.type).filter(Boolean))],
+      loot: (c.loot || []).map((l) => ({ name: l.name, chance: l.chance || 0, min: l.minCount || 1, max: l.maxCount || 1 })) }));
     dexByName = {};
     for (const c of arr) if (c.pokeId != null && c.pokeId < 10000) idxName(c.name, c.pokeId);   // só as base viram fonte de sprite
   } catch (e) { console.error('[coletor] creatures.json', e && e.message); }
@@ -176,8 +182,8 @@ const seenNothing = {};
 let selectedSlot = null;
 let gameMode = 'grid';     // 'grid' | 'single'
 let view = 'accounts';     // 'accounts' | 'captures'
+let modalOpen = false;     // painel de config/notificações aberto → esconde as telas do jogo pra ele aparecer por cima
 let overlayWin = null;
-const globalSeen = new Map();
 let diagOn = false;        // modo diagnóstico: grava os frames crus do WS pra realinhar o parser
 let dumpPath = null;
 const diagSeen = {};
@@ -196,13 +202,32 @@ function dumpFrame(slot, payload) {
     fs.appendFileSync(dumpPath, JSON.stringify({ slot, t: Date.now(), type, raw: payload }) + '\n');
   } catch {}
 }
+// diagnóstico: grava também a resposta de chamadas REST /api/ (ex.: mercado global, que pode não
+// vir por WS). Só quando o modo diag está ligado. Redige qualquer token na querystring por segurança.
+function dumpHttp(slot, url, body, b64) {
+  if (!dumpPath) return;
+  try {
+    const clean = String(url).replace(/([?&](?:token|access_token|jwt|auth|refresh(?:Token)?)=)[^&]*/gi, '$1<redacted>');
+    let raw = body; if (b64) { try { raw = Buffer.from(body, 'base64').toString('utf8'); } catch {} }
+    if (raw && raw.length > 200000) raw = raw.slice(0, 200000) + '…[truncado]';   // teto por segurança
+    fs.appendFileSync(dumpPath, JSON.stringify({ slot, t: Date.now(), kind: 'http', url: clean, raw }) + '\n');
+  } catch {}
+}
 
 const activeSlots = () => games.map((g) => g.slot);
 function nextFreeSlot() { for (let s = 1; s <= MAXV; s++) if (!activeSlots().includes(s)) return s; return null; }
 function persistSlots() { try { store.setSettings({ activeSlots: activeSlots() }); } catch {} }
 function charNameOf(slot) { const g = games.find((x) => x.slot === slot); return (g && g.state && g.state.charName) || null; }
 // rótulo da conta: nome que o Antônio deu > nick do char (da REST) > "Conta N"
-function getName(slot) { const n = (store.getSettings().accountNames || {})[String(slot)]; return n || charNameOf(slot) || `Conta ${slot}`; }
+function realName(slot) { const n = (store.getSettings().accountNames || {})[String(slot)]; return n || charNameOf(slot) || null; }
+function getName(slot) { return realName(slot) || `Conta ${slot}`; }
+// grava o evento com o nome REAL da conta se já conhecido; o fallback "Conta N" nunca vai pro disco,
+// só pra UI — assim o histórico ganha o nick retroativamente quando ele carregar
+function appendEv(slot, obj) {
+  const n = realName(slot);
+  const ev = store.appendEvent(Object.assign({ account: `acc${slot}` }, n ? { accountName: n } : {}, obj));
+  return ev.accountName ? ev : Object.assign({ accountName: getName(slot) }, ev);
+}
 
 // ---------------- layout ----------------
 const GAP = 3;   // divisória fininha entre as telas
@@ -230,7 +255,8 @@ function layout() {
   const b = win.getContentBounds();
   setViewBounds(dashView, { x: 0, y: 0, width: b.width, height: b.height });   // a UI (app.html) ocupa a janela toda
   const target = new Map();   // slot -> rect das telas que devem estar VISÍVEIS
-  if (view === 'game') {
+  // modalOpen: config/notif abertos → nenhuma tela visível, pra o painel (que fica ATRÁS na ordem z) aparecer
+  if (view === 'game' && !modalOpen) {
     const x0 = SIDE_W, y0 = BAR, w = Math.max(b.width - x0, 100), h = Math.max(b.height - y0, 100);
     if (gameMode === 'grid') {                                             // GRADE: todas as telas do jogo em 2×2 (1–4)
       const rects = tileRects(games.length, x0, y0, w, h);
@@ -290,6 +316,317 @@ function injectGameHelpers(g) {
   try { const wc = g.view.webContents; if (!wc || wc.isDestroyed()) return; wc.executeJavaScript(GAME_HELPERS_JS, false).catch(() => {}); } catch {}
 }
 
+// ---------------- lista simplificada DENTRO do Mapa do jogo ----------------
+// Quando o modal do Mapa abre, uma LISTA ordenável (tipo, Lv, XP, venda, loot, efetividade
+// vs o SEU time) cobre a área do mapa; "Ver mapa do jogo" volta pro visual. Só UI: os dados
+// vêm do catálogo público (creatures/items.json) + tipos do time (WS). Clicar numa linha NÃO
+// inicia hunt — preenche a busca do próprio mapa (mesma técnica React-aware do seletor de
+// nível) e mostra o mapa pra VOCÊ clicar na hunt.
+const MAP_TC = calc.TYPE_CHART;   // fonte ÚNICA da tabela de efetividade (ver calc.js); o script do Mapa a serializa
+const MAP_TP_PT = { NORMAL: 'Normal', FIRE: 'Fogo', WATER: 'Água', GRASS: 'Planta', ELECTRIC: 'Elétrico', ICE: 'Gelo', FIGHTING: 'Lutador', POISON: 'Veneno', GROUND: 'Terra', FLYING: 'Voador', PSYCHIC: 'Psíquico', BUG: 'Inseto', ROCK: 'Pedra', GHOST: 'Fantasma', DRAGON: 'Dragão', DARK: 'Sombrio', STEEL: 'Aço', FAIRY: 'Fada' };
+const MAP_TP_COL = { NORMAL: '#A8A77A', FIRE: '#EE8130', WATER: '#6390F0', ELECTRIC: '#F7D02C', GRASS: '#7AC74C', ICE: '#96D9D6', FIGHTING: '#C22E28', POISON: '#A33EA1', GROUND: '#E2BF65', FLYING: '#A98FF3', PSYCHIC: '#F95587', BUG: '#A6B91A', ROCK: '#B6A136', GHOST: '#735797', DRAGON: '#6F35FC', DARK: '#705746', STEEL: '#B7B7CE', FAIRY: '#D685AD' };
+const MAP_RAR_PT = { COMMON: 'Comum', UNCOMMON: 'Incomum', RARE: 'Rara', EPIC: 'Épica', LEGENDARY: 'Lendária', MYTHIC: 'Mythic' };
+
+const GAME_MAPLIST_JS = `(function(){
+  if (window.__pczMapList) return; window.__pczMapList = 1;
+  var TC=${JSON.stringify(MAP_TC)}, TPT=${JSON.stringify(MAP_TP_PT)}, TCOL=${JSON.stringify(MAP_TP_COL)}, RPT=${JSON.stringify(MAP_RAR_PT)};
+  var nset = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  function setIn(i, v) { try { nset.call(i, String(v)); i.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {} }
+  function eff1(a, d) { var r = TC[a]; if (!r) return 1; var v = r[d]; return v == null ? 1 : v; }
+  function effVs(a, d1, d2) { return eff1(a, d1) * (d2 ? eff1(a, d2) : 1); }   // dupla tipagem multiplica
+  function best(team, d1, d2) { var b = null; (team || []).forEach(function (p) { [p.type1, p.type2].forEach(function (a) { if (!a) return; var m = effVs(a, d1, d2); if (!b || m > b.m) b = { m: m, t: a, n: p.name }; }); }); return b; }
+  function effTxt(m) { return ('×' + m).replace('.', ','); }
+  function effCol(m) { return m >= 4 ? '#f7cf4f' : m >= 2 ? '#56df89' : m === 0 ? '#66708a' : m < 1 ? '#ff6b7a' : '#e8edf5'; }
+  function fmt(n) { return n == null ? '—' : Number(n).toLocaleString('pt-BR'); }
+  function badge(t) { return t ? '<span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:9.5px;font-weight:700;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.35);margin-right:3px;background:' + (TCOL[t] || '#666') + '">' + (TPT[t] || t) + '</span>' : ''; }
+  var S = { k: 'lv', d: 1, q: '', t: '', mn: '', mx: '' };
+  function findSearch() { var ins = document.querySelectorAll('input'); for (var i = 0; i < ins.length; i++) { if (/buscar hunt/i.test(ins[i].getAttribute('placeholder') || '')) return ins[i]; } return null; }
+  // acha o marcador da hunt no mapa do jogo: elemento "folha" cujo texto é exatamente o nome,
+  // fora da nossa lista; sobe pro ancestral clicável (cursor:pointer) se houver
+  function findMarker(name) {
+    var ml = document.getElementById('pcz-ml');
+    var root = (ml && ml.parentElement) ? ml.parentElement : document.body;
+    var lo = String(name).toLowerCase(), all = root.querySelectorAll('*'), cand = null;
+    for (var i = 0; i < all.length; i++) {   // querySelectorAll é ordem de documento: o último match é o mais PROFUNDO (rótulo, não contêiner)
+      var el = all[i];
+      if (ml && ml.contains(el)) continue;
+      var t = (el.textContent || '').trim().toLowerCase();
+      if (t !== lo && t.indexOf(lo + ' ') !== 0 && t.replace(/\\s*nv\\s*\\d+$/, '') !== lo) continue;
+      if (cand && !cand.contains(el)) continue;   // só desce na MESMA cadeia (não pula pra outro marcador)
+      cand = el;
+    }
+    if (!cand) return null;
+    var e = cand, hops = 0;
+    while (e && hops < 7) { try { if (getComputedStyle(e).cursor === 'pointer' || e.onclick) return e; } catch (_) {} e = e.parentElement; hops++; }
+    return cand;
+  }
+  function fireClick(el) {
+    try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
+    var r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(function (tp) {
+      try { el.dispatchEvent(new MouseEvent(tp, { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y })); } catch (_) {}
+    });
+  }
+  // teleporta pra hunt de uma espécie (chamado pelo botão Shiny Hunt da barra lateral, via IPC).
+  // Se o mapa estiver aberto, filtra e clica no marcador; se não, tenta ABRIR o mapa primeiro.
+  function openMapBtn() {
+    // botão real do jogo (confirmado por sonda de DOM): <button class="dock-btn" aria-label="Mapa"> com <img src=".../icon_map.png">
+    var el = document.querySelector('button.dock-btn[aria-label="Mapa" i], [aria-label="Mapa" i], img[src*="icon_map"]');
+    if (el) {
+      if (el.tagName === 'IMG') el = el.closest('button,[role=button],a') || el;   // clica no botão, não na imagem
+      fireClick(el); return true;
+    }
+    // fallback: qualquer clicável rotulado "mapa"/"map" (caso o jogo mude a marcação num update)
+    var cands = document.querySelectorAll('button,[role=button],a,img');
+    for (var i = 0; i < cands.length; i++) {
+      var c = cands[i];
+      var lbl = ((c.getAttribute && (c.getAttribute('aria-label') || c.getAttribute('title') || c.getAttribute('alt'))) || '') + ' ' + (c.childElementCount === 0 ? (c.textContent || '') : '');
+      if (/\bmapa?\b/i.test(lbl)) { fireClick(c.closest && c.tagName === 'IMG' ? (c.closest('button,[role=button],a') || c) : c); return true; }
+    }
+    return false;
+  }
+  window.__pczGotoHunt = function (name) {
+    var weOpened = false, entering = false;
+    function enter() {   // filtra o mapa e clica no marcador da hunt (tenta por ~3s até o marcador surgir)
+      var inp = findSearch(); if (inp) setIn(inp, name);
+      (function findLoop(t) {
+        var el = findMarker(name);
+        if (el) { fireClick(el); return; }
+        if (t < 20) setTimeout(function () { findLoop(t + 1); }, 160);
+      })(0);
+    }
+    (function waitOpen(tries) {
+      if (entering) return;
+      var inp = findSearch();
+      if (inp) {                         // mapa está aberto
+        entering = true;
+        if (weOpened) {                  // FOMOS nós que abrimos → espera aleatório 1–3s antes de entrar
+          setTimeout(enter, 1000 + Math.floor(Math.random() * 2000));
+        } else { enter(); }              // já estava aberto → entra direto
+        return;
+      }
+      if (!weOpened) { weOpened = true; openMapBtn(); }   // mapa fechado → clica no botão de mapa
+      if (tries < 40) setTimeout(function () { waitOpen(tries + 1); }, 160);
+    })(0);
+  };
+  // volta pra Cerulean: mira direto no botão dock-btn do HUD (sempre presente quando logado)
+  window.__pczReturnCerulean = function () {
+    var btn = document.querySelector('button.dock-btn[aria-label="Voltar para Cerulean" i]');
+    if (!btn) {
+      var img = document.querySelector('img[src*="/home.png" i]');
+      if (img) btn = img.closest('button');
+    }
+    if (btn) fireClick(btn);
+  };
+  function render() {
+    var b = document.getElementById('pcz-ml-b'); if (!b) return;
+    var D = window.__pczMapData || { creatures: [], team: [] };
+    var q = S.q.toLowerCase(), rows = [];
+    (D.creatures || []).forEach(function (c) {
+      if (q && c.name.toLowerCase().indexOf(q) < 0) return;
+      if (S.t && c.type1 !== S.t && c.type2 !== S.t) return;
+      if (S.mn !== '' && !(c.huntLevel >= +S.mn)) return;
+      if (S.mx !== '' && !(c.huntLevel <= +S.mx)) return;
+      rows.push({ c: c, b: best(D.team, c.type1, c.type2) });
+    });
+    var k = S.k, d = S.d;
+    function val(r) { switch (k) { case 'name': return r.c.name.toLowerCase(); case 'lv': return r.c.huntLevel || 0; case 'xp': return r.c.xpKill || 0; case 'sell': return r.c.sellValue || 0; case 'loot': return r.c.lootGold || 0; case 'eff': return r.b ? r.b.m : -1; default: return 0; } }
+    rows.sort(function (a, bb) { var x = val(a), y = val(bb); if (typeof x === 'string') return x.localeCompare(y) * d; return (x > y ? 1 : x < y ? -1 : 0) * d; });
+    var n = document.getElementById('pcz-ml-n'); if (n) n.textContent = rows.length + ' hunts' + ((D.team || []).length ? '' : ' · time ainda carregando…');
+    var hd = document.getElementById('pcz-ml-head');
+    if (hd) Array.prototype.forEach.call(hd.querySelectorAll('th[data-k] span'), function (sp) { sp.textContent = sp.parentElement.getAttribute('data-k') === S.k ? (S.d < 0 ? ' ▾' : ' ▴') : ''; });
+    b.innerHTML = rows.map(function (r) {
+      var c = r.c, bb = r.b;
+      return '<tr data-n="' + c.name + '" style="cursor:pointer;border-bottom:1px solid #1b2438">'
+        + '<td style="padding:5px 9px;font-weight:600">' + c.name + '</td>'
+        + '<td style="padding:5px 4px">' + badge(c.type1) + badge(c.type2) + '</td>'
+        + '<td style="text-align:right;padding:5px 9px">' + (c.huntLevel || '') + '</td>'
+        + '<td style="padding:5px 9px;color:#a8b3c7">' + (RPT[c.rarity] || c.rarity || '') + '</td>'
+        + '<td style="text-align:right;padding:5px 9px">' + fmt(c.xpKill) + '</td>'
+        + '<td style="text-align:right;padding:5px 9px;color:#56df89">' + fmt(c.sellValue) + '</td>'
+        + '<td style="text-align:right;padding:5px 9px">' + (c.lootGold ? fmt(Math.round(c.lootGold)) : '—') + '</td>'
+        + '<td style="padding:5px 9px">' + (bb ? '<b style="color:' + effCol(bb.m) + '">' + effTxt(bb.m) + '</b> <span style="color:#8791a4;font-size:10.5px">' + bb.n + ' · ' + (TPT[bb.t] || '') + '</span>' : '<span style="color:#66708a">—</span>') + '</td>'
+        + '</tr>';
+    }).join('');
+    Array.prototype.forEach.call(b.querySelectorAll('tr'), function (tr) {
+      tr.onclick = function () {
+        var name = tr.getAttribute('data-n');
+        var inp = findSearch(); if (inp) setIn(inp, name);   // filtra o mapa (feedback visual + fallback)
+        var ov = document.getElementById('pcz-ml'), pill = document.getElementById('pcz-ml-pill');
+        if (ov) ov.style.display = 'none'; if (pill) pill.style.display = 'block';
+        // repassa O SEU clique pro marcador da hunt no mapa (1 clique → 1 clique; se não achar, fica o filtro)
+        var tries = 0, tm = setInterval(function () {
+          tries++;
+          var el = findMarker(name);
+          if (el) { clearInterval(tm); fireClick(el); }
+          else if (tries > 20) clearInterval(tm);
+        }, 150);
+      };
+    });
+  }
+  window.__pczMapRefresh = render;
+  function build() {
+    var inp = findSearch(); if (!inp || document.getElementById('pcz-ml')) return;
+    var modal = null, e = inp;
+    while (e && e !== document.body) { if (e.clientHeight > 380 && e.clientWidth > 420) { modal = e; break; } e = e.parentElement; }
+    if (!modal) return;
+    if (getComputedStyle(modal).position === 'static') modal.style.position = 'relative';
+    var rM = modal.getBoundingClientRect(), rI = inp.getBoundingClientRect();
+    var top = Math.max(0, Math.round(rI.bottom - rM.top) + 6);   // deixa header/abas/busca do jogo visíveis
+    var inSt = 'background:#182231;color:#e8edf5;border:1px solid #33405a;border-radius:6px;padding:3px 7px;font-size:11.5px;outline:none';
+    var ov = document.createElement('div'); ov.id = 'pcz-ml';
+    ov.style.cssText = 'position:absolute;left:0;right:0;bottom:0;top:' + top + 'px;z-index:99999;background:#0c1320;color:#e8edf5;display:flex;flex-direction:column;font:12px/1.45 system-ui,sans-serif;overflow:hidden';
+    ov.innerHTML = '<div style="display:flex;gap:6px;align-items:center;padding:7px 10px;border-bottom:1px solid #26304a;flex-wrap:wrap">'
+      + '<b style="font-size:12.5px">📋 Lista de hunts</b>'
+      + '<input id="pcz-ml-q" placeholder="nome…" style="width:110px;' + inSt + '">'
+      + '<select id="pcz-ml-t" style="' + inSt + ';padding:3px 4px"><option value="">Todos os tipos</option>' + Object.keys(TPT).map(function (t) { return '<option value="' + t + '">' + TPT[t] + '</option>'; }).join('') + '</select>'
+      + '<input id="pcz-ml-mn" type="number" placeholder="Lv mín" style="width:58px;' + inSt + '">'
+      + '<input id="pcz-ml-mx" type="number" placeholder="Lv máx" style="width:58px;' + inSt + '">'
+      + '<span id="pcz-ml-n" style="color:#8791a4;font-size:10.5px"></span>'
+      + '<span style="flex:1"></span>'
+      + '<button id="pcz-ml-map" style="' + inSt + ';cursor:pointer">🗺 Ver mapa do jogo</button>'
+      + '</div>'
+      + '<div style="flex:1;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr id="pcz-ml-head">'
+      + [['name', 'Pokémon', 'left'], ['', 'Tipos', 'left'], ['lv', 'Lv', 'right'], ['', 'Raridade', 'left'], ['xp', 'XP/kill', 'right'], ['sell', 'Venda', 'right'], ['loot', 'Loot/kill', 'right'], ['eff', 'Melhor do time', 'left']].map(function (h) {
+        return '<th ' + (h[0] ? 'data-k="' + h[0] + '"' : '') + ' style="position:sticky;top:0;background:#101a2b;text-align:' + h[2] + ';padding:6px 9px;color:#8791a4;font-size:10px;text-transform:uppercase;letter-spacing:.4px;' + (h[0] ? 'cursor:pointer' : '') + '">' + h[1] + '<span></span></th>';
+      }).join('')
+      + '</tr></thead><tbody id="pcz-ml-b"></tbody></table></div>'
+      + '<div style="padding:5px 10px;color:#66708a;border-top:1px solid #26304a;font-size:10px">Clique numa hunt pra ENTRAR nela (se o jogo não abrir, ela fica filtrada no mapa pra você clicar). Efetividade considera as DUAS tipagens (ex.: Pedra em Fogo/Voador = ×4). Loot/kill = ouro estimado.</div>';
+    modal.appendChild(ov);
+    var pill = document.createElement('button'); pill.id = 'pcz-ml-pill'; pill.textContent = '📋 Lista';
+    pill.style.cssText = 'position:absolute;right:14px;bottom:14px;z-index:99998;display:none;background:#182231;color:#e8edf5;border:1px solid #33405a;border-radius:16px;padding:6px 12px;cursor:pointer;font-size:12px';
+    modal.appendChild(pill);
+    pill.onclick = function () { ov.style.display = 'flex'; pill.style.display = 'none'; };
+    ov.querySelector('#pcz-ml-map').onclick = function () { ov.style.display = 'none'; pill.style.display = 'block'; };
+    var q = ov.querySelector('#pcz-ml-q'); q.oninput = function () { S.q = q.value; render(); };
+    var t = ov.querySelector('#pcz-ml-t'); t.onchange = function () { S.t = t.value; render(); };
+    var mn = ov.querySelector('#pcz-ml-mn'); mn.oninput = function () { S.mn = mn.value; render(); };
+    var mx = ov.querySelector('#pcz-ml-mx'); mx.oninput = function () { S.mx = mx.value; render(); };
+    Array.prototype.forEach.call(ov.querySelectorAll('th[data-k]'), function (th) {
+      th.onclick = function () { var k = th.getAttribute('data-k'); S.d = (S.k === k) ? -S.d : -1; S.k = k; render(); };
+    });
+    render();
+  }
+  try { var mo = new MutationObserver(function () { build(); }); mo.observe(document.documentElement, { childList: true, subtree: true }); build(); } catch (_) {}
+})();`;
+// ouro esperado de loot por kill: chance (escala 100000) × qtd média × preço NPC do item (casado por nome)
+function enrichedCreatures() {
+  const priceByName = {};
+  for (const it of Object.values(itemCatalog)) if (it.name) priceByName[it.name.toLowerCase()] = it.npcPrice || 0;
+  return creatures.map((c) => Object.assign({}, c, {
+    lootGold: +(c.loot || []).reduce((s, l) => s + (l.chance / 100000) * ((l.min + l.max) / 2) * (priceByName[(l.name || '').toLowerCase()] || 0), 0).toFixed(1),
+  }));
+}
+// TOOLTIP DO JOGO (.inv-tip): quando o jogo mostra o tooltip de um poke, lemos o TEXTO dele
+// (Nv, Qualidade ×Y, IV D/D — mesmo formato que o justpokedex parseia) e ANEXAMOS uma linha
+// "💎 Potencial X% · Raridade". Só leitura do texto + append de 1 nó nosso; nada do jogo é alterado.
+const GAME_TOOLTIP_JS = `(function(){
+  if(window.__pczTip) return; window.__pczTip=1;
+  function rar(q){ if(q==null) return null;
+    if(q<1.0)return['Fraca','#8a93a6']; if(q<1.1)return['Comum','#b8c0cf']; if(q<1.3)return['Incomum','#63c77a'];
+    if(q<1.5)return['Rara','#4aa3ff']; if(q<1.7)return['Épica','#b06cff']; if(q<2.0)return['Lendária','#f7cf4f'];
+    if(q<3.0)return['Mythic','#ff7ab0']; if(q<4.0)return['Ancient','#ff9a4a']; return['Divine','#ff5a5a']; }
+  function num(s){ if(s==null)return null; var n=parseFloat(String(s).replace(',','.')); return isNaN(n)?null:n; }
+  function analyze(tip){
+    try{
+      var full=tip.innerText||'';
+      var base=full.replace(/💎[^\\n]*/g,'').trim();          // ignora a NOSSA linha ao comparar
+      var ex=tip.querySelector('.pcz-pot');
+      if(!/(?:Nv|N[ií]vel|Lv)\\.?\\s*\\d+/i.test(base)){ if(ex)ex.remove(); tip.__pczSig=''; return; }   // não é card de poke
+      if(tip.__pczSig===base) return;                          // mesmo poke → não refaz
+      tip.__pczSig=base;
+      if(ex)ex.remove();
+      var ivM=base.match(/IV\\s*(\\d+)\\s*\\/\\s*(\\d+)/i);
+      var qM=base.match(/(?:×|x)\\s*([\\d.,]+)/i);
+      var iv=ivM?parseInt(ivM[1],10):null, ivMax=ivM?parseInt(ivM[2],10):192;
+      var q=qM?num(qM[1]):null, r=rar(q);
+      if(iv==null && q==null) return;                          // nada pra mostrar
+      var parts=[];
+      if(r) parts.push('<b style="color:'+r[1]+'">'+r[0]+'</b>'+(q!=null?' <span style="opacity:.65">×'+q+'</span>':''));
+      if(iv!=null){ var pot=Math.round(iv/ivMax*100);
+        var col=pot>=90?'#f7cf4f':pot>=75?'#56df89':pot>=50?'#e8edf5':'#ff8a95';
+        parts.push('Potencial <b style="color:'+col+'">'+pot+'%</b> <span style="opacity:.65">('+iv+'/'+ivMax+')</span>'); }
+      var el=document.createElement('div'); el.className='pcz-pot';
+      el.style.cssText='margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.16);font:600 12px/1.35 system-ui,sans-serif;color:#e8edf5;white-space:nowrap;';
+      el.innerHTML='💎 '+parts.join(' · ');
+      tip.appendChild(el);
+    }catch(e){}
+  }
+  var pending=false;
+  function scan(){ pending=false; var tips=document.querySelectorAll('.inv-tip'); for(var i=0;i<tips.length;i++) analyze(tips[i]); }
+  var mo=new MutationObserver(function(){ if(pending)return; pending=true; requestAnimationFrame(scan); });
+  mo.observe(document.documentElement,{childList:true,subtree:true});
+  scan();
+})();`;
+function injectTooltip(g) {
+  try { const wc = g.view.webContents; if (!wc || wc.isDestroyed()) return; wc.executeJavaScript(GAME_TOOLTIP_JS, false).catch(() => {}); } catch {}
+}
+
+// MERCADO GLOBAL (cards .mkt2-card): o jogo já mostra IV/raridade/quality no card; a gente ANEXA
+// um badge de POTENCIAL % (IV/192) colorido pra bater o olho e achar os melhores. Só leitura do
+// texto do card ("IV D/D") + append de 1 badge nosso. Estrutura confirmada por sonda de DOM.
+const GAME_MARKET_JS = `(function(){
+  if(window.__pczMkt) return; window.__pczMkt=1;
+  function col(p){ return p>=90?'#f7cf4f':p>=75?'#56df89':p>=50?'#8fb3ff':'#ff8a95'; }
+  function analyze(card){
+    try{
+      var meta=card.querySelector('.mkt2-card-meta'); if(!meta) return;
+      var ivM=(meta.innerText||'').match(/IV\\s*(\\d+)\\s*\\/\\s*(\\d+)/i); if(!ivM) return;
+      var iv=parseInt(ivM[1],10), ivMax=parseInt(ivM[2],10)||192, pot=Math.round(iv/ivMax*100);
+      var ex=card.querySelector('.pcz-mkpot');
+      if(ex){ if(card.__pczIv===iv) return; ex.remove(); }
+      card.__pczIv=iv;
+      var el=document.createElement('span'); el.className='pcz-mkpot';
+      el.style.cssText='display:inline-block;margin-left:6px;padding:0 7px;border-radius:8px;font-weight:800;font-size:11px;line-height:17px;color:#0c1320;background:'+col(pot)+';';
+      el.title='Potencial do IV (nosso)'; el.textContent=pot+'%';
+      meta.appendChild(el);
+    }catch(e){}
+  }
+  var pending=false;
+  function scan(){ pending=false; var cs=document.querySelectorAll('.mkt2-card'); for(var i=0;i<cs.length;i++) analyze(cs[i]); }
+  var mo=new MutationObserver(function(){ if(pending)return; pending=true; requestAnimationFrame(scan); });
+  mo.observe(document.documentElement,{childList:true,subtree:true});
+  scan();
+})();`;
+function injectMarket(g) {
+  try { const wc = g.view.webContents; if (!wc || wc.isDestroyed()) return; wc.executeJavaScript(GAME_MARKET_JS, false).catch(() => {}); } catch {}
+}
+
+// SONDA DE DOM (só leitura): captura o outerHTML do maior painel/modal aberto agora na tela do
+// jogo, pra descobrir a estrutura real (classes, ids, data-attrs) antes de injetar UI. Não muda nada.
+const DOM_PROBE_JS = `(function(){
+  try{
+    function desc(el){ var id=el.id?('#'+el.id):''; var cls=(typeof el.className==='string'&&el.className)?('.'+el.className.trim().split(/\\s+/).slice(0,3).join('.')):''; return el.tagName.toLowerCase()+id+cls; }
+    var best=null,bestArea=0,cands=[];
+    var all=document.querySelectorAll('div,section,dialog,[role=dialog]');
+    for(var i=0;i<all.length;i++){ var el=all[i];
+      if(el.id&&el.id.indexOf('pcz')===0) continue;
+      if(el.closest&&el.closest('#pcz-ml')) continue;
+      var s=getComputedStyle(el); if(s.position!=='fixed'&&s.position!=='absolute') continue;
+      if(s.display==='none'||s.visibility==='hidden'||+s.opacity===0) continue;
+      var r=el.getBoundingClientRect(); if(r.width<320||r.height<260) continue;
+      var area=r.width*r.height; cands.push(desc(el)+' '+Math.round(r.width)+'x'+Math.round(r.height));
+      if(area>bestArea){ bestArea=area; best=el; }
+    }
+    var target=best||document.body;
+    var html=target.outerHTML||''; if(html.length>180000) html=html.slice(0,180000)+'<!--[truncado]-->';
+    return { picked: desc(target), candidates: cands.slice(0,24), html: html };
+  }catch(e){ return { picked:'(erro)', candidates:[String(e&&e.message)], html:'' }; }
+})()`;
+function injectMapList(g) {
+  try { const wc = g.view.webContents; if (!wc || wc.isDestroyed()) return; wc.executeJavaScript(GAME_MAPLIST_JS, false).catch(() => {}); } catch {}
+}
+function pushMapList(g) {
+  try {
+    const wc = g.view.webContents; if (!wc || wc.isDestroyed() || !creatures.length) return;
+    const data = {
+      creatures: enrichedCreatures().map((c) => ({ name: c.name, type1: c.type1, type2: c.type2, huntLevel: c.huntLevel, rarity: c.rarity, xpKill: c.xpKill, sellValue: c.sellValue, lootGold: c.lootGold })),
+      team: (g.state.team || []).filter((p) => p.team || p.leader).map((p) => ({ name: p.name, type1: p.type1 || null, type2: p.type2 || null })),
+    };
+    wc.executeJavaScript('window.__pczMapData=' + JSON.stringify(data) + ';window.__pczMapRefresh&&window.__pczMapRefresh();', false).catch(() => {});
+  } catch {}
+}
+
 // ---------------- proteção de venda (bloqueia venda de raro via interceptação REST) ----------------
 const SELL_PATTERNS = ['*/api/game/pokemon/sell', '*/api/game/shop/sell', '*/api/game/flint/sell'];
 // devolve o motivo (string) se a venda inclui algo PROTEGIDO; senão null
@@ -336,6 +673,7 @@ function handleSellIntercept(g, wc, params) {
 function attachCapture(g) {
   const wc = g.view.webContents;
   const wsUrls = new Map();
+  const httpReqs = new Map();   // requestId -> url das respostas /api/ a gravar (só no modo diag)
   try { wc.debugger.attach('1.3'); }
   catch (e) { console.error('[coletor] attach', g.slot, e && e.message); return; }
   wc.debugger.sendCommand('Network.enable').catch(() => {});
@@ -344,6 +682,17 @@ function attachCapture(g) {
     try {
       if (method === 'Fetch.requestPaused') handleSellIntercept(g, wc, params);
       else if (method === 'Network.webSocketCreated') wsUrls.set(params.requestId, params.url);
+      else if (method === 'Network.responseReceived') {   // diag: marca respostas REST /api/ pra gravar o corpo
+        const url = params.response && params.response.url;
+        if (diagOn && url && /\/api\//.test(url) && params.type !== 'WebSocket') httpReqs.set(params.requestId, url);
+      }
+      else if (method === 'Network.loadingFinished') {   // corpo já disponível → puxa e grava
+        if (diagOn && httpReqs.has(params.requestId)) {
+          const url = httpReqs.get(params.requestId); httpReqs.delete(params.requestId);
+          wc.debugger.sendCommand('Network.getResponseBody', { requestId: params.requestId })
+            .then((res) => { if (res && res.body) dumpHttp(g.slot, url, res.body, res.base64Encoded); }).catch(() => {});
+        } else if (httpReqs.has(params.requestId)) httpReqs.delete(params.requestId);
+      }
       else if (method === 'Network.webSocketFrameReceived') {
         const r = params.response;
         if (r && r.opcode === 1 && r.payloadData) {
@@ -425,16 +774,22 @@ async function pollServer(g) {
 }
 
 // ---------------- eventos ----------------
+// "notável" = quality >= qualityMin E IV >= ivMin (mesmo critério do alerta de captura e da Box)
 function isRare(cap, st) {
-  if (rarityIdx(cap.rarity) >= rarityIdx(st.alertRarity)) return true;
-  if (cap.iv && cap.iv / 192 >= (st.ivAlertFrac || 0.9)) return true;
-  return false;
+  const q = +cap.quality || 0, iv = +cap.iv || 0;
+  const qMin = st.qualityMin != null ? st.qualityMin : 1.73;
+  const ivMin = st.ivMin != null ? st.ivMin : 110;
+  return q >= qMin && iv >= ivMin;
 }
-function dedupeGlobal(gl) {
-  const key = `${gl.player}|${gl.name}`, now = Date.now(), last = globalSeen.get(key);
-  globalSeen.set(key, now);
-  if (globalSeen.size > 200) globalSeen.delete(globalSeen.keys().next().value);
-  return !(last && now - last < 8000);
+// mapeia um poke cru (frame `pokes`/`poke-delta`) pro formato compacto persistido na Box
+function boxPoke(p) {
+  if (!p || p.id == null) return null;
+  return {
+    id: p.id, speciesId: p.speciesId, dex: resolveDex(p.speciesId, p.name), name: p.name,
+    level: p.level, shiny: !!p.shiny, team: !!p.team, leader: !!p.leader,
+    iv: p.ivTotal, ivMax: 192, quality: p.quality, rarity: gp.rarityFromQuality(p.quality), power: p.power,
+    type1: p.type1 || null, type2: p.type2 || null, stats: p.stats || null, sellValue: p.sellValue,
+  };
 }
 
 function handleMessage(g, msg) {
@@ -451,21 +806,38 @@ function handleMessage(g, msg) {
       const rec = { ts: Date.now(), name: c.name, dex, iv: c.iv, quality: c.quality, rarity: c.rarity, shiny: !!c.shiny };
       g.recent.push(rec); if (g.recent.length > 100) g.recent.shift();
       const kind = c.shiny ? 'shiny_capture' : (isRare(c, st) ? 'rare_capture' : 'capture');
-      const ev = store.appendEvent({ account: `acc${g.slot}`, type: kind, name: c.name, dex, iv: c.iv, ivMax: 192, quality: c.quality, rarity: c.rarity, ball: c.ball, shiny: !!c.shiny });
-      const ui = Object.assign({ accountName: getName(g.slot) }, ev);
+      // campos extras (level/power/tipos/stats) alimentam o card do hover no painel de capturas
+      const ev = appendEv(g.slot, {
+        type: kind, name: c.name, dex, iv: c.iv, ivMax: 192, quality: c.quality, rarity: c.rarity,
+        ball: c.ball, shiny: !!c.shiny, level: c.level, power: c.power,
+        type1: c.type1 || null, type2: c.type2 || null, stats: c.stats || null, sellValue: c.sellValue,
+      });
+      const ui = ev;
       pushEvent(ui);
-      if (kind !== 'capture') { alertUI(ui); if (kind === 'shiny_capture' && st.screenshotOnShiny) shoot(g, ev); }
-    } else if (e.type === 'shiny_wild') {
-      const ev = store.appendEvent({ account: `acc${g.slot}`, type: 'shiny_wild', name: e.cap.name, dex: resolveDex(e.cap.speciesId, e.cap.name) });
-      const ui = Object.assign({ accountName: getName(g.slot) }, ev);
-      pushEvent(ui); alertUI(ui);
-    } else if (e.type === 'shiny_global') {
-      if (dedupeGlobal(e.global)) {
-        const ev = store.appendEvent({ account: `acc${g.slot}`, type: 'shiny_global', player: e.global.player, name: e.global.name, dex: e.global.dexId, tier: e.global.tier });
-        const ui = Object.assign({ accountName: getName(g.slot) }, ev);
-        pushEvent(ui); alertUI(ui);
-        // (a pedido: SEM print no shiny global — só no MEU shiny)
+      // Box: registra a captura na hora (o frame `pokes` depois confirma/atualiza equipe e nível)
+      if (c.id != null) try { store.upsertBox(`acc${g.slot}`, {
+        id: c.id, speciesId: c.speciesId, dex, name: c.name, level: c.level, shiny: !!c.shiny,
+        iv: c.iv, ivMax: 192, quality: c.quality, rarity: c.rarity, power: c.power,
+        type1: c.type1 || null, type2: c.type2 || null, stats: c.stats || null, sellValue: c.sellValue,
+      }); } catch {}
+      if (kind !== 'capture') { alertUI(ui); if (kind === 'shiny_capture') { if (st.screenshotOnShiny) shoot(g, ev); postDiscordShiny(g, c); } }
+    } else if (e.type === 'shiny_field') {
+      // shiny APARECEU na tela (oportunidade de captura). Debounce: no máx 1 por 20s por conta,
+      // porque um mesmo shiny pode reaparecer em frames após sair/voltar do campo de visão.
+      const now = Date.now();
+      if (!g._shinyFieldTs || now - g._shinyFieldTs > 20000) {
+        g._shinyFieldTs = now;
+        // o mob do frame `field` só traz speciesId (= dex nacional); o NOME vem do catálogo
+        const dex = resolveDex(e.cap.speciesId, e.cap.name);
+        const nm = e.cap.name || (creatures.find((c) => c.dex === dex) || {}).name || null;
+        const ev = appendEv(g.slot, { type: 'shiny_field', name: nm, dex });
+        pushEvent(ev); alertUI(ev);
       }
+    } else if (e.type === 'shiny_wild') {
+      const ev = appendEv(g.slot, { type: 'shiny_wild', name: e.cap.name, dex: resolveDex(e.cap.speciesId, e.cap.name) });
+      pushEvent(ev); alertUI(ev);
+    } else if (e.type === 'shiny_global') {
+      // shiny de OUTROS players: ignorado de propósito (o usuário só quer os shinys das próprias contas)
     } else if (e.type === 'hunt-reset') {
       g.startTs = Date.now(); g.leaderLevelStart = null; g.recent = [];   // zera o cronômetro dos "por hora"
     } else if (e.type === 'disconnected') {
@@ -475,26 +847,62 @@ function handleMessage(g, msg) {
     }
   }
   evalAlerts(g);
+  evalGift(g);
+  if (g.bot && g.bot.running) {
+    if (msg.type === 'field-init') g.bot._onEvent('field-init');
+    if (msg.type === 'profession-photo') g.bot._onEvent('profession_photo');
+    for (const e of evs) {
+      if (e.type === 'shiny_field') g.bot._onEvent('shiny_field');
+      if (e.type === 'shiny_capture') g.bot._onEvent('shiny_capture');
+    }
+  }
+  if (msg.type === 'pokes') {
+    pushMapList(g);   // time mudou → atualiza a efetividade da lista do Mapa
+    // Box: o frame `pokes` traz a coleção inteira → persiste tudo (merge por id, com nível/equipe atuais)
+    try { store.saveBoxList(`acc${g.slot}`, (g.state.team || []).map(boxPoke).filter(Boolean)); } catch {}
+  }
   if (msg.type !== 'field' && msg.type !== 'chat') pushState(g);
 }
 
 // ---------------- alertas (balls/potions acabando, morte, desconexão) ----------------
 function fireAlert(g, type, extra) {
-  const ev = store.appendEvent(Object.assign({ account: `acc${g.slot}`, type }, extra || {}));
-  const ui = Object.assign({ accountName: getName(g.slot) }, ev);
-  pushEvent(ui); alertUI(ui);
+  const ev = appendEv(g.slot, Object.assign({ type }, extra || {}));
+  pushEvent(ev); alertUI(ev);
 }
-// total de bolas ÚTEIS (ignora Master id 5, que é rara/limitada e não conta pra "acabando")
-function ballsTotalUsable(s) { if (!s.balls) return null; let t = 0; for (const [id, q] of Object.entries(s.balls)) { if (String(id) === '5') continue; t += q || 0; } return t; }
+// só aceita URL de webhook do PRÓPRIO Discord (evita mandar dado pra qualquer lugar por erro de digitação)
+const DISCORD_WEBHOOK_RE = /^https:\/\/(?:ptb\.|canary\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[\w-]+$/i;
+function discordMessage(cap, accName) {
+  const iv = cap.iv != null ? `${cap.iv}/192 (${Math.round(cap.iv / 192 * 100)}%)` : '—';
+  return `✨ **Shiny capturado!** ${cap.name || '?'} — conta **${accName}** · IV ${iv}${cap.quality ? ` · quality ${cap.quality}` : ''}`;
+}
+async function postDiscord(content) {
+  const url = (store.getSettings().discordWebhook || '').trim();
+  if (!DISCORD_WEBHOOK_RE.test(url)) return false;   // vazio ou não-Discord → não envia
+  try {
+    await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'Poke Idle Launcher', content }) });
+    return true;
+  } catch { return false; }
+}
+function postDiscordShiny(g, cap) { postDiscord(discordMessage(cap, getName(g.slot))).catch(() => {}); }
+// SÓ Ultra Ball conta pro alerta/aura: as outras bolas ficam paradas no inventário, é a Ultra que se gasta
+function ultraBallsTotal(s) {
+  if (!s.balls) return null;
+  const ub = (s.ballCatalog || []).find((b) => /ultra/i.test(b.name || ''));
+  if (!ub) return null;   // catálogo ainda não chegou → não alarma
+  return s.balls[ub.id] || s.balls[String(ub.id)] || 0;
+}
 // total de potions (itens da categoria heal do inventário)
 function potionsTotal(s) { if (!s.inventory) return null; let t = 0; for (const it of s.inventory) { const c = itemCatalog[it.itemId]; if (c && c.category === 'heal') t += it.quantity || 0; } return t; }
+// total de revives (categoria revive: Revive + Max Revive)
+function revivesTotal(s) { if (!s.inventory) return null; let t = 0; for (const it of s.inventory) { const c = itemCatalog[it.itemId]; if (c && c.category === 'revive') t += it.quantity || 0; } return t; }
 // dispara alertas por LIMIAR com histerese (só refoga quando volta bem acima → não fica repetindo)
 function evalAlerts(g) {
   const s = g.state, st = store.getSettings();
   g._al = g._al || {};
   const ballsThr = st.ballsAlert != null ? st.ballsAlert : 200;
   const potThr = st.potionsAlert != null ? st.potionsAlert : 30;
-  const bt = ballsTotalUsable(s);
+  const revThr = st.revivesAlert != null ? st.revivesAlert : 10;
+  const bt = ultraBallsTotal(s);   // SÓ Ultra Ball (as outras não são gastas na prática)
   if (bt != null) {
     if (bt <= ballsThr && !g._al.balls) { g._al.balls = true; fireAlert(g, 'balls_low', { count: bt }); }
     else if (bt > ballsThr * 1.5) g._al.balls = false;
@@ -505,6 +913,32 @@ function evalAlerts(g) {
     else if (pt > 0) g._al.potOut = false;
     if (pt > 0 && pt <= potThr && !g._al.pot) { g._al.pot = true; fireAlert(g, 'potions_low', { count: pt }); }
     else if (pt > potThr * 1.5) g._al.pot = false;
+  }
+  const rv = revivesTotal(s);
+  if (rv != null) {
+    if (rv <= revThr && !g._al.rev) { g._al.rev = true; fireAlert(g, 'revives_low', { count: rv }); }
+    else if (rv > revThr * 1.5) g._al.rev = false;
+  }
+}
+
+// PRESENTE DIÁRIO (Fase 2): o único sinal de rede é state.mail.gifts (nº de presentes no correio).
+// - gifts>0  → há presente pra coletar → alerta 1× por leva (respeitando o toggle giftAlert).
+// - gifts caiu p/ 0 → coletou tudo → marca o relógio; o painel mostra a contagem regressiva de 24h.
+// Heurística calibrável: gifts do correio ≈ presente diário (o jogo não expõe um endpoint dedicado).
+function evalGift(g) {
+  const s = g.state, st = store.getSettings();
+  const gifts = s.mail ? (s.mail.gifts || 0) : null;
+  if (gifts == null) return;   // correio ainda não chegou
+  const prev = g._prevGifts;
+  g._prevGifts = gifts;
+  if (prev != null && prev > 0 && gifts === 0) {   // transição p/ zero = coletou → inicia as 24h
+    s.giftClaimedAt = Date.now();
+    store.saveProgress(`acc${g.slot}`, { giftClaimedAt: s.giftClaimedAt });
+  }
+  if (gifts > 0) {
+    if (st.giftAlert !== false && !g._giftAlerted) { g._giftAlerted = true; fireAlert(g, 'gift', { count: gifts }); }
+  } else {
+    g._giftAlerted = false;   // rearma pro próximo presente
   }
 }
 
@@ -517,7 +951,12 @@ function huntInfo(slug) {
   if (!slug) return null;
   const norm = String(slug).replace(/_/g, ' ').toLowerCase();
   const c = creatures.find((x) => x.name && x.name.toLowerCase() === norm);
-  return { slug, name: c ? c.name : titleCase(norm), dex: c ? resolveDex(c.dex, c.name) : resolveDex(null, norm), type: c ? (c.type1 || null) : null };
+  const type1 = c ? (c.type1 || null) : null, type2 = c ? (c.type2 || null) : null;
+  return {
+    slug, name: c ? c.name : titleCase(norm), dex: c ? resolveDex(c.dex, c.name) : resolveDex(null, norm),
+    type: type1, type1, type2,
+    defense: calc.defenseProfile(type1, type2),   // a que o ALVO é fraco → o que levar pra caçar (Fase 1)
+  };
 }
 
 function compactState(g) {
@@ -573,21 +1012,36 @@ function compactState(g) {
       name: leader.name, dex: resolveDex(leader.speciesId, leader.name), level: leader.level, iv: leader.ivTotal, ivMax: 192,
       quality: leader.quality, rarity: gp.rarityFromQuality(leader.quality), power: leader.power,
       shiny: !!leader.shiny, stats: leader.stats || null,
+      type1: leader.type1 || null, type2: leader.type2 || null,
+      defense: calc.defenseProfile(leader.type1, leader.type2),   // a que o líder é fraco/resiste/imune (Fase 1)
       evolvesTo: leader.evolvesToName || null, evolveNeedLevel: leader.evolveNeedLevel || null,
     } : null,
     teamCount: (s.team || []).filter((p) => p.team).length,   // pokes.list traz a coleção inteira; time = os com team:true
+    // tipos do time (pro cálculo de efetividade no Mapa)
+    team: (s.team || []).filter((p) => p.team || p.leader).map((p) => ({
+      name: p.name, dex: resolveDex(p.speciesId, p.name), level: p.level, leader: !!p.leader,
+      type1: p.type1 || null, type2: p.type2 || null,
+    })),
     analyzer: a || null, live,
     // OURO/h = SEMPRE o nosso cálculo fiel (loot+capturas−balls), que reseta por hunt.
     // (não usar o goldPerHour do analyzer OFICIAL: só existe com o painel aberto e fica velho na troca de hunt)
     kpi: { netPerHour: goldPerHourCalc, xpPerHour: Math.round(L.xp / hrs), captures, shinyCaught: L.shinyCaught || 0, ballsPerCap: cc.ballsPerCap },
     goldNet: gn, goldCalc: { lootGold, captureGold, ballCost, net: netGoldCalc, perHour: goldPerHourCalc }, xpBreak: xb, shiny, goals: gl,
     prof: { photos: s.profession.photos || 0 }, mail: s.mail || null,
+    dailyGift: (() => {   // Fase 2: presentes pendentes + contagem regressiva de 24h desde a última coleta
+      const claimedAt = s.giftClaimedAt || null;
+      const nextAt = claimedAt ? claimedAt + 24 * 3600 * 1000 : null;
+      return { gifts: (s.mail && s.mail.gifts) || 0, claimedAt, nextAt, msLeft: nextAt ? Math.max(nextAt - now, 0) : null };
+    })(),
     trainer: s.trainer || null, accountGold: s.accountGold != null ? s.accountGold : null, diamonds: s.diamonds != null ? s.diamonds : null,
     profession: s.serverProfessions || null,   // rank/rankName/pictures/nextStep (autoritativo da REST)
     pokedex: { caught: dexCaught, total: dexTotal, missing: dexTotal ? Math.max(dexTotal - dexCaught, 0) : null, source: sp ? 'server' : 'local' },
     balls: s.balls || null, ballList, bag: buildBag(s.inventory), caught: caughtArr,
+    // suprimentos que importam (pro widget e pra aura vermelha do painel)
+    supplies: { ultra: ultraBallsTotal(s), potions: potionsTotal(s), revives: revivesTotal(s) },
     boosts: (s.boosts || []).map((b) => ({ name: b.name, emoji: b.emoji, desc: b.desc, until: b.until, pct: b.pct })),
-    bestCatch: s.bestCatch || null,
+    bestCatch: s.bestCatch ? Object.assign({}, s.bestCatch, { dex: resolveDex(s.bestCatch.speciesId, s.bestCatch.name) }) : null,
+    bot: g.bot ? g.bot.getStatus() : null,
     recent: g.recent.slice(-40).reverse(),
   };
 }
@@ -611,7 +1065,7 @@ function shoot(g, ev) {
   if (!wc || wc.isDestroyed()) return;
   wc.capturePage().then((img) => {
     const p = store.saveShot(`acc${g.slot}`, img.toPNG());
-    if (p) pushEvent(Object.assign({ accountName: getName(g.slot) }, store.appendEvent({ account: `acc${g.slot}`, type: 'shot', shot: p, of: ev.type, name: ev.name || null })));
+    if (p) pushEvent(appendEv(g.slot, { type: 'shot', shot: p, of: ev.type, name: ev.name || null }));
   }).catch(() => {});
 }
 
@@ -623,6 +1077,7 @@ function seedFromCache(g) {   // preenche o estado com o que ficou salvo → pai
     if (prog.analyzer) g.state.analyzer = prog.analyzer;
     if (prog.profession) g.state.profession = prog.profession;
     if (prog.mail) g.state.mail = prog.mail;
+    if (prog.giftClaimedAt) g.state.giftClaimedAt = prog.giftClaimedAt;   // relógio de 24h do presente diário
     for (const id of store.getCaught(acc)) g.state.caughtSpecies.add(id);   // pokédex acumulada no disco
   } catch {}
 }
@@ -631,11 +1086,12 @@ function createGame(slot) {
     webPreferences: { partition: `persist:acc${slot}`, contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false },
   });
   const g = { view: view2, slot, state: gp.newState(), recent: [], startTs: Date.now(), leaderLevelStart: null, _lastPush: 0 };
+  g.bot = new ShinyHuntBot(g, () => pushState(g));
   seedFromCache(g);   // mostra o último analyzer/profissão/pokédex antes mesmo do login
   attachTokenRestore(g);   // "lembrar login": restaura o token salvo antes do jogo pedir login
   attachCapture(g);   // antes do load, pra pegar o WS desde o começo
   // assim que a página carrega: injeta o declutter da UI + (com folga pro token) puxa o snapshot REST
-  g.view.webContents.on('did-finish-load', () => { injectGameUX(g); injectGameHelpers(g); setTimeout(() => pollServer(g).catch(() => {}), 3500); });
+  g.view.webContents.on('did-finish-load', () => { injectGameUX(g); injectGameHelpers(g); injectMapList(g); injectTooltip(g); injectMarket(g); setTimeout(() => { pollServer(g).catch(() => {}); pushMapList(g); }, 3500); });
   g.view.webContents.loadURL(GAME_URL).catch((e) => console.error('[coletor] loadURL', slot, e && e.message));
   win.contentView.addChildView(g.view);   // única vez — layout() não re-adiciona (roubaria o foco)
   g.view.setVisible(false); g._shown = false;
@@ -653,6 +1109,7 @@ function removeGame(slot) {
   const i = games.findIndex((g) => g.slot === slot);
   if (i < 0) return activeSlots();
   const g = games[i];
+  if (g.bot) g.bot.stop();
   try { g.view.webContents.debugger.detach(); } catch {}
   try { win.contentView.removeChildView(g.view); } catch {}
   try { if (typeof g.view.webContents.close === 'function') g.view.webContents.close(); } catch {}
@@ -689,6 +1146,23 @@ ipcMain.handle('setView', (_e, v, slot) => {
   if (nv === view && ns === selectedSlot) return view;
   view = nv; selectedSlot = ns; layout(); return view;
 });
+// painel de config/notificações aberto/fechado: em game view, esconde/reexibe as telas do jogo
+// (elas ficam por cima na ordem z e tapavam o painel). layout() é idempotente e não rouba foco.
+ipcMain.handle('setModalOpen', (_e, open) => { const nv = !!open; if (nv === modalOpen) return modalOpen; modalOpen = nv; layout(); return modalOpen; });
+// abre o simulador PIW Tools (externo) já preenchido com os stats do poke. URL de host fixo (nada de
+// abrir link arbitrário) e só leitura — nenhuma ação de jogo. Disparado por clique do usuário.
+ipcMain.handle('openPiwTools', (_e, p) => {
+  try {
+    if (!p || !p.name) return false;
+    const st = p.stats || {};
+    const q = (k) => encodeURIComponent(st[k] != null ? st[k] : 0);
+    const name = encodeURIComponent(String(p.name).toLowerCase().trim());
+    const level = encodeURIComponent(p.level != null ? p.level : 1);
+    const url = `https://piwtools.vercel.app/hunt?pokemon=${name}&level=${level}&hp=${q('hp')}&atk=${q('atk')}&def=${q('def')}&spatk=${q('spAtk')}&spdef=${q('spDef')}&speed=${q('speed')}&tab=route&routeTarget=300`;
+    shell.openExternal(url);
+    return true;
+  } catch { return false; }
+});
 ipcMain.handle('setAccountName', (_e, slot, name) => {
   const s = store.getSettings(); const names = Object.assign({}, s.accountNames || {});
   if (name && name.trim()) names[String(slot)] = name.trim().slice(0, 20); else delete names[String(slot)];
@@ -697,6 +1171,21 @@ ipcMain.handle('setAccountName', (_e, slot, name) => {
   return names;
 });
 ipcMain.handle('reloadGame', (_e, slot) => { const g = games.find((x) => x.slot === slot); if (g) g.view.webContents.reload(); });
+// limpa SÓ o cache HTTP (mantém cookies + storage = NÃO desloga) e recarrega. Storage/cookies não são tocados de propósito.
+ipcMain.handle('testDiscord', () => postDiscord('✅ Teste do Poke Idle Launcher — webhook configurado! Você vai receber aqui quando pegar um shiny. ✨'));
+ipcMain.handle('returnCerulean', (_e, slot) => {
+  const g = games.find((x) => x.slot === slot);
+  if (!g || !g.view || g.view.webContents.isDestroyed()) return false;
+  try { g.view.webContents.executeJavaScript('window.__pczReturnCerulean && window.__pczReturnCerulean()', false).catch(() => {}); } catch {}
+  return true;
+});
+ipcMain.handle('clearGameCache', async (_e, slot) => {
+  const g = games.find((x) => x.slot === slot);
+  if (!g || !g.view || g.view.webContents.isDestroyed()) return false;
+  try { await g.view.webContents.session.clearCache(); } catch {}
+  try { g.view.webContents.reload(); } catch {}
+  return true;
+});
 ipcMain.handle('viewsInfo', () => games.map((g) => ({ slot: g.slot, name: getName(g.slot), url: g.view.webContents.getURL() })));
 ipcMain.handle('snapshotAll', () => { games.forEach((g) => pushState(g)); return activeSlots(); });
 // pull REST autoritativo SOB DEMANDA (clique do usuário no "Atualizar") — nunca em timer
@@ -705,8 +1194,61 @@ ipcMain.handle('refreshServer', async (_e, slot) => {
   await Promise.all(list.map((g) => pollServer(g).catch(() => {})));
   return true;
 });
-ipcMain.handle('getEvents', () => store.readEvents(5000).map((e) => Object.assign({ accountName: getName((e.account || '').replace('acc', '')) }, e)));
-ipcMain.handle('getCreatures', () => creatures);
+ipcMain.handle('getEvents', () => store.readEvents(50000).map((e) => e.accountName ? e : Object.assign({ accountName: getName(Number((e.account || '').replace('acc', ''))) }, e)));
+ipcMain.handle('getDaily', () => store.getDaily());
+ipcMain.handle('gotoHunt', (_e, slot, name) => {
+  const g = games.find((x) => x.slot === slot);
+  if (!g || !g.view || g.view.webContents.isDestroyed() || !name) return false;
+  try { g.view.webContents.executeJavaScript('window.__pczGotoHunt && window.__pczGotoHunt(' + JSON.stringify(String(name)) + ')', false).catch(() => {}); } catch {}
+  return true;
+});
+ipcMain.handle('startBot', (_e, slot, huntList) => {
+  const g = games.find((x) => x.slot === slot);
+  if (!g || !g.bot || !huntList || !huntList.length) return false;
+  const ok = g.bot.start(huntList);
+  if (ok) pushState(g);
+  return ok;
+});
+ipcMain.handle('stopBot', (_e, slot) => {
+  const g = games.find((x) => x.slot === slot);
+  if (!g || !g.bot) return false;
+  g.bot.stop();
+  return true;
+});
+ipcMain.handle('getBotStatus', (_e, slot) => {
+  const g = games.find((x) => x.slot === slot);
+  return g && g.bot ? g.bot.getStatus() : null;
+});
+ipcMain.handle('getCreatures', () => enrichedCreatures());
+// sonda de DOM: salva o HTML do painel aberto do jogo (dom-probe-<ts>.html) e abre no explorador
+ipcMain.handle('probeGameDom', async (_e, slot) => {
+  const g = games.find((x) => x.slot === slot) || games[0];
+  if (!g || !g.view || g.view.webContents.isDestroyed()) return { error: 'sem tela do jogo' };
+  try {
+    const res = await g.view.webContents.executeJavaScript(DOM_PROBE_JS, true);
+    if (!res) return { error: 'sem resultado' };
+    const file = path.join(path.dirname(dumpPath), `dom-probe-${Date.now()}.html`);
+    try { fs.writeFileSync(file, res.html || ''); shell.showItemInFolder(file); } catch {}
+    return { picked: res.picked, candidates: res.candidates, file, len: (res.html || '').length };
+  } catch (e) { return { error: e && e.message }; }
+});
+ipcMain.handle('getBox', () => store.getBox());   // Box Pokémon: coleção persistida por conta { acc: { id: poke } }
+// Mercado Global (sob demanda): puxa /api/game/market rodando na página de uma conta LOGADA (herda o token).
+// Enriquecemos cada listagem com dex (sprite) e rarity. Nada de ação de jogo — GET de leitura pura.
+ipcMain.handle('getMarket', async (_e, slot, category) => {
+  const g = games.find((x) => x.slot === slot && x.state && (x.state.hunt || (x.state.team && x.state.team.length)))
+    || games.find((x) => x.state && (x.state.hunt || (x.state.team && x.state.team.length))) || games[0];
+  if (!g) return { error: 'no-account' };
+  const raw = await api.pullMarket(g.view.webContents, category || 'Pokemon');
+  if (!raw) return { error: 'no-data' };
+  if (raw.__noauth) return { error: 'noauth' };
+  if (raw.__error) return { error: raw.__error };
+  const norm = api.normMarket(raw);
+  if (!norm) return { error: 'bad-shape' };
+  norm.listings = norm.listings.map((x) => Object.assign(x, { dex: resolveDex(x.speciesId, x.name), rarity: gp.rarityFromQuality(x.quality) }));
+  norm.fromSlot = g.slot;
+  return norm;
+});
 ipcMain.handle('toggleOverlay', () => toggleOverlay());
 ipcMain.handle('winMinimize', () => { if (win) win.minimize(); });
 ipcMain.handle('winClose', () => { if (win) win.close(); });

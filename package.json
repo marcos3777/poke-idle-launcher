@@ -29,6 +29,7 @@
       "calc.js",
       "server-api.js",
       "token-vault.js",
+      "shiny-hunt-bot.js",
       "app.html",
       "overlay.html"
     ],
